@@ -213,14 +213,14 @@ flowchart TD
     E -->|FAILED| H[PAYMENT_COMPENSATE]
 
     H --> I{PAYMENT_COMPENSATE_RESULT}
-    I -->|PAYMENT_REFUNDED| Z3[ORDER_FAILED + payment_refunded=true]
+    I -->|PAYMENT_REFUNDED| Z3[ORDER_FAILED refund ok]
     I -->|RETRYING| H
-    I -->|FAILED| Z4[ORDER_FAILED + payment_refund_failed=true]
+    I -->|FAILED| Z4[ORDER_FAILED refund failed]
 
     F --> G{NOTIFICATION_RESULT}
     G -->|NOTIFIED| Z2[ORDER_COMPLETED]
     G -->|RETRYING| F
-    G -->|FAILED| Z5[ORDER_COMPLETED (notification_error=true)]
+    G -->|FAILED| Z5[ORDER_COMPLETED notification error]
 ```
 
 ## Status do Pedido
