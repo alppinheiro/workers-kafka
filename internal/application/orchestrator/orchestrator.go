@@ -12,9 +12,10 @@ import (
 
 // sagaState guarda o estado lógico de uma saga em andamento, mantido apenas em memória nesta fase.
 type sagaState struct {
-	previous   domain.OrderStatus
-	current    domain.OrderStatus
-	retryCount int
+	previous      domain.OrderStatus
+	current       domain.OrderStatus
+	retryCount    int
+	transactionID string
 }
 
 // Orchestrator coordena o avanço, retry e encerramento da saga do pedido, sem executar regra de negócio das etapas.
@@ -86,17 +87,48 @@ func (o *Orchestrator) HandleResult(ctx context.Context, event domain.Event) err
 		log.Printf("component=orchestrator phase=decision action=retry-requested order_id=%s saga_id=%s event_id=%s type=%s state_current=%s retry_count=%d metadata=%v", event.OrderID, event.SagaID, event.EventID, event.EventType, state.current, state.retryCount, event.Metadata)
 		return o.retry(ctx, event.OrderID, state)
 	case domain.StatusFailed:
+		// special-case: notification failures do not change order outcome - treat as completed (notification requested but failed)
+		if event.EventType == domain.EventNotificationResult {
+			log.Printf("component=orchestrator phase=decision action=notification-failed-ignored order_id=%s saga_id=%s event_id=%s metadata=%v", event.OrderID, event.SagaID, event.EventID, event.Metadata)
+			// mark saga completed even if notification failed; include metadata to signal notification problem
+			meta := map[string]string{"notification_error": "true"}
+			return o.complete(ctx, event.OrderID, state, meta)
+		}
+
+		// special-case: if inventory failed but payment was previously approved, request async compensation
 		log.Printf("component=orchestrator phase=decision action=fail-requested order_id=%s saga_id=%s event_id=%s type=%s state_current=%s retry_count=%d metadata=%v", event.OrderID, event.SagaID, event.EventID, event.EventType, state.current, state.retryCount, event.Metadata)
+		if event.EventType == domain.EventInventoryResult && state.current == domain.StatusPaymentApproved && state.transactionID != "" {
+			// publish async compensation command with the transaction id
+			compCmd := domain.Event{
+				EventID:        domain.NewEventID(),
+				OrderID:        event.OrderID,
+				SagaID:         event.SagaID,
+				TransactionID:  state.transactionID,
+				StatusAnterior: state.current,
+				StatusAtual:    state.current,
+				EventType:      domain.EventPaymentCompensate,
+				SchemaVersion:  domain.CurrentSchemaVersion,
+				CreatedAt:      time.Now().UTC(),
+			}
+			log.Printf("component=orchestrator phase=decision action=dispatch-compensation order_id=%s saga_id=%s tx=%s", event.OrderID, event.SagaID, state.transactionID)
+			if err := o.publisher.Publish(ctx, compCmd); err != nil {
+				log.Printf("component=orchestrator phase=decision action=compensation-publish-failed order_id=%s saga_id=%s err=%v", event.OrderID, event.SagaID, err)
+			}
+		}
 		return o.fail(ctx, event.OrderID, state, event.Metadata)
 	case domain.StatusPaymentApproved, domain.StatusInventoryReserved:
 		log.Printf("component=orchestrator phase=decision action=advance order_id=%s saga_id=%s event_id=%s type=%s from=%s to=%s retry_count=%d", event.OrderID, event.SagaID, event.EventID, event.EventType, state.current, event.StatusAtual, state.retryCount)
 		state.previous = state.current
 		state.current = event.StatusAtual
 		state.retryCount = 0
+		// if payment was approved, persist the transaction id for potential future compensation
+		if event.EventType == domain.EventPaymentResult {
+			state.transactionID = event.TransactionID
+		}
 		return o.dispatchNext(ctx, event.OrderID)
 	case domain.StatusNotified:
 		log.Printf("component=orchestrator phase=decision action=complete-requested order_id=%s saga_id=%s event_id=%s type=%s state_current=%s", event.OrderID, event.SagaID, event.EventID, event.EventType, state.current)
-		return o.complete(ctx, event.OrderID, state)
+		return o.complete(ctx, event.OrderID, state, nil)
 	default:
 		return fmt.Errorf("status inesperado recebido pelo orquestrador para o pedido %s: %s", event.OrderID, event.StatusAtual)
 	}
@@ -109,6 +141,11 @@ func (o *Orchestrator) retry(ctx context.Context, orderID string, state *sagaSta
 	if state.retryCount > o.maxRetries {
 		metadata := map[string]string{"motivo": "retry_limit_exceeded"}
 		log.Printf("component=orchestrator phase=decision action=retry-limit-exceeded order_id=%s saga_id=%s state_current=%s retry_count=%d", orderID, orderID, state.current, state.retryCount)
+		// special-case: if we're in notification stage, do not fail the order on exhausted retries
+		if state.current == domain.StatusInventoryReserved {
+			meta := map[string]string{"notification_error": "true", "motivo": "retry_limit_exceeded"}
+			return o.complete(ctx, orderID, state, meta)
+		}
 		return o.fail(ctx, orderID, state, metadata)
 	}
 	return o.dispatchNext(ctx, orderID)
@@ -126,13 +163,14 @@ func (o *Orchestrator) fail(ctx context.Context, orderID string, state *sagaStat
 }
 
 // complete encerra a saga em COMPLETED após receber a confirmação NOTIFIED do worker final.
-func (o *Orchestrator) complete(ctx context.Context, orderID string, state *sagaState) error {
+// metadata opcional pode conter informações sobre falhas não-fatais (ex.: notificações).
+func (o *Orchestrator) complete(ctx context.Context, orderID string, state *sagaState, metadata map[string]string) error {
 	state.previous = state.current
 	state.current = domain.StatusNotified
 	state.retryCount = 0
-	log.Printf("component=orchestrator phase=decision action=publishing-completed order_id=%s saga_id=%s from=%s to=%s", orderID, orderID, domain.StatusNotified, domain.StatusCompleted)
+	log.Printf("component=orchestrator phase=decision action=publishing-completed order_id=%s saga_id=%s from=%s to=%s metadata=%v", orderID, orderID, domain.StatusNotified, domain.StatusCompleted, metadata)
 
-	if err := o.publisher.Publish(ctx, terminalEvent(orderID, domain.StatusNotified, domain.StatusCompleted, domain.EventOrderCompleted, nil)); err != nil {
+	if err := o.publisher.Publish(ctx, terminalEvent(orderID, domain.StatusNotified, domain.StatusCompleted, domain.EventOrderCompleted, metadata)); err != nil {
 		return err
 	}
 

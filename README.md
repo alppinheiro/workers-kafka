@@ -73,6 +73,8 @@ Para reproduzir cenários de debug:
 make create-order ORDER_ID=order-payment-fail-001
 make create-order ORDER_ID=order-inventory-retry-once-001
 make create-order ORDER_ID=order-notification-fail-001
+
+make create-order ORDER_ID=order-inventory-fail-001  # aciona compensação do pagamento quando aplicável
 ```
 
 ### Passo a passo
@@ -113,19 +115,22 @@ make check
 
 ```mermaid
 flowchart LR
-    CO[Create Order] --> OC[orders.created]
-    OC --> ORQ[Orchestrator]
-    ORQ --> OP[orders.payment]
-    OP --> PAY[Worker Payment]
-    PAY --> OP
-    ORQ --> OI[orders.inventory]
-    OI --> INV[Worker Inventory]
-    INV --> OI
-    ORQ --> ON[orders.notification]
-    ON --> NOTI[Worker Notification]
-    NOTI --> ON
-    ORQ --> OS[orders.status]
-    OS --> AUD[Order Status Consumer]
+  CO[Create Order] --> OC[orders.created]
+  OC --> ORQ[Orchestrator]
+  ORQ --> OP[orders.payment]
+  OP --> PAY[Worker Payment]
+  PAY --> OP
+  ORQ --> OI[orders.inventory]
+  OI --> INV[Worker Inventory]
+  INV --> OI
+  ORQ --> ON[orders.notification]
+  ON --> NOTI[Worker Notification]
+  NOTI --> ON
+  ORQ --> OP_COMP[orders.payment (compensate)]
+  OP_COMP --> PAY_COMP[Worker Payment (compensate)]
+  PAY_COMP --> OP_COMP
+  ORQ --> OS[orders.status]
+  OS --> AUD[Order Status Consumer]
 ```
 
 ## Fluxo Ponta a Ponta
@@ -160,6 +165,36 @@ sequenceDiagram
     K->>S: ORDER_COMPLETED
 ```
 
+  ### Fluxo com falha no estoque (compensação)
+
+  ```mermaid
+  sequenceDiagram
+    participant C as create-order
+    participant K as Kafka
+    participant O as Orchestrator
+    participant P as Worker Payment
+    participant I as Worker Inventory
+    participant PC as Worker Payment (compensate)
+    participant S as Order Status
+
+    C->>K: ORDER_CREATED / PENDING
+    K->>O: ORDER_CREATED
+    O->>K: PAYMENT_COMMAND / PAYMENT_PENDING
+    K->>P: PAYMENT_COMMAND
+    P->>K: PAYMENT_RESULT / PAYMENT_APPROVED (tx=transaction_id)
+    K->>O: PAYMENT_RESULT
+    O->>K: INVENTORY_COMMAND / PAYMENT_APPROVED
+    K->>I: INVENTORY_COMMAND
+    I->>K: INVENTORY_RESULT / FAILED
+    K->>O: INVENTORY_RESULT
+    O->>K: PAYMENT_COMPENSATE / (transaction_id)
+    K->>PC: PAYMENT_COMPENSATE
+    PC->>K: PAYMENT_COMPENSATE_RESULT / PAYMENT_REFUNDED
+    K->>O: PAYMENT_COMPENSATE_RESULT
+    O->>K: ORDER_FAILED / FAILED
+    K->>S: ORDER_FAILED
+  ```
+
 ### Fluxo de Decisão da Saga
 
 ```mermaid
@@ -168,17 +203,20 @@ flowchart TD
     B --> C{PAYMENT_RESULT}
     C -->|PAYMENT_APPROVED| D[INVENTORY_COMMAND]
     C -->|RETRYING| B
-    C -->|FAILED| Z1[ORDER_FAILED]
+  C -->|FAILED| Z1[ORDER_FAILED]
 
-    D --> E{INVENTORY_RESULT}
-    E -->|INVENTORY_RESERVED| F[NOTIFICATION_COMMAND]
-    E -->|RETRYING| D
-    E -->|FAILED| Z1
+  D --> E{INVENTORY_RESULT}
+  E -->|INVENTORY_RESERVED| F[NOTIFICATION_COMMAND]
+  E -->|RETRYING| D
+  E -->|FAILED| Z3[ORDER_FAILED + REQUEST PAYMENT_COMPENSATE]
 
-    F --> G{NOTIFICATION_RESULT}
-    G -->|NOTIFIED| Z2[ORDER_COMPLETED]
-    G -->|RETRYING| F
-    G -->|FAILED| Z1
+  Z3 --> H[Orchestrator publishes PAYMENT_COMPENSATE (transaction_id) and ORDER_FAILED]
+  H --> I[Worker Payment processes PAYMENT_COMPENSATE -> PAYMENT_REFUNDED]
+
+  F --> G{NOTIFICATION_RESULT}
+  G -->|NOTIFIED| Z2[ORDER_COMPLETED]
+  G -->|RETRYING| F
+  G -->|FAILED| Z4[ORDER_COMPLETED (notification_error=true)]
 ```
 
 ## Status do Pedido
@@ -186,6 +224,7 @@ flowchart TD
 - `PENDING`: pedido criado
 - `PAYMENT_PENDING`: aguardando processamento de pagamento
 - `PAYMENT_APPROVED`: pagamento aprovado
+- `PAYMENT_REFUNDED`: pagamento estornado/compensado
 - `INVENTORY_RESERVED`: estoque reservado
 - `NOTIFIED`: notificação concluída
 - `COMPLETED`: saga concluída com sucesso
@@ -197,6 +236,8 @@ flowchart TD
 - `ORDER_CREATED`
 - `PAYMENT_COMMAND`
 - `PAYMENT_RESULT`
+- `PAYMENT_COMPENSATE`
+- `PAYMENT_COMPENSATE_RESULT`
 - `INVENTORY_COMMAND`
 - `INVENTORY_RESULT`
 - `NOTIFICATION_COMMAND`
@@ -379,11 +420,13 @@ O orquestrador registra ações como:
 | --- | --- | --- |
 | Sucesso completo | pagamento, estoque e notificação concluem com sucesso | `ORDER_COMPLETED` / `COMPLETED` |
 | Falha definitiva no pagamento | pagamento retorna `FAILED` | `ORDER_FAILED` / `FAILED` |
-| Falha definitiva no estoque | estoque retorna `FAILED` | `ORDER_FAILED` / `FAILED` |
-| Falha definitiva na notificação | notificação retorna `FAILED` | `ORDER_FAILED` / `FAILED` |
+| Falha definitiva no estoque (após pagamento aprovado) | estoque retorna `FAILED`; orquestrador publica `ORDER_FAILED` e solicita `PAYMENT_COMPENSATE` assíncrono com `transaction_id` | `ORDER_FAILED` / `FAILED` (estorno solicitado assíncrono)
+| Falha definitiva na notificação | notificação retorna `FAILED` (não houve erro em etapas anteriores) | `ORDER_COMPLETED` / `COMPLETED` + metadata `notification_error=true` |
 | Falha temporária com recuperação | uma etapa retorna `RETRYING` e depois conclui | saga continua até sucesso ou nova decisão |
 | Falha temporária até estourar retry | a etapa continua falhando temporariamente | `ORDER_FAILED` / `FAILED` |
 | Evento fora de ordem | resultado chega incompatível com o estado atual | evento rejeitado e saga não avança |
+
+> Observação: quando aplicável, o orquestrador solicita um estorno assíncrono (`PAYMENT_COMPENSATE`) usando o `transaction_id` retornado no `PAYMENT_RESULT`. A compensação é processada por `worker-payment` sem bloquear a emissão do evento terminal; o `transaction_id` permite auditoria e correlação entre pagamento e estorno.
 
 ### 1. Pedido completado com sucesso
 

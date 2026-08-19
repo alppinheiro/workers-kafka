@@ -10,6 +10,7 @@ const (
 	StatusInventoryReserved OrderStatus = "INVENTORY_RESERVED"
 	StatusNotified          OrderStatus = "NOTIFIED"
 	StatusCompleted         OrderStatus = "COMPLETED"
+	StatusPaymentRefunded   OrderStatus = "PAYMENT_REFUNDED"
 	StatusRetrying          OrderStatus = "RETRYING"
 	StatusFailed            OrderStatus = "FAILED"
 )

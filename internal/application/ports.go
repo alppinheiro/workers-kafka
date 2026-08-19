@@ -21,7 +21,10 @@ type EventConsumer interface {
 
 // PaymentGateway simula a chamada à API externa de pagamento.
 type PaymentGateway interface {
-	Process(ctx context.Context, orderID string) (approved bool, err error)
+	// Process autoriza/efetua o pagamento e retorna se foi aprovado, o transactionID gerado e um erro temporário.
+	Process(ctx context.Context, orderID string) (approved bool, transactionID string, err error)
+	// Refund tenta estornar um pagamento previamente efetuado identificado pelo transactionID.
+	Refund(ctx context.Context, orderID string, transactionID string) (refunded bool, err error)
 }
 
 // InventoryGateway simula a chamada à API externa de estoque.
