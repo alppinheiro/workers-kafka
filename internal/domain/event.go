@@ -6,15 +6,17 @@ import "time"
 type EventType string
 
 const (
-	EventOrderCreated        EventType = "ORDER_CREATED"
-	EventOrderCompleted      EventType = "ORDER_COMPLETED"
-	EventOrderFailed         EventType = "ORDER_FAILED"
-	EventPaymentCommand      EventType = "PAYMENT_COMMAND"
-	EventPaymentResult       EventType = "PAYMENT_RESULT"
-	EventInventoryCommand    EventType = "INVENTORY_COMMAND"
-	EventInventoryResult     EventType = "INVENTORY_RESULT"
-	EventNotificationCommand EventType = "NOTIFICATION_COMMAND"
-	EventNotificationResult  EventType = "NOTIFICATION_RESULT"
+	EventOrderCreated            EventType = "ORDER_CREATED"
+	EventOrderCompleted          EventType = "ORDER_COMPLETED"
+	EventOrderFailed             EventType = "ORDER_FAILED"
+	EventPaymentCompensate       EventType = "PAYMENT_COMPENSATE"
+	EventPaymentCompensateResult EventType = "PAYMENT_COMPENSATE_RESULT"
+	EventPaymentCommand          EventType = "PAYMENT_COMMAND"
+	EventPaymentResult           EventType = "PAYMENT_RESULT"
+	EventInventoryCommand        EventType = "INVENTORY_COMMAND"
+	EventInventoryResult         EventType = "INVENTORY_RESULT"
+	EventNotificationCommand     EventType = "NOTIFICATION_COMMAND"
+	EventNotificationResult      EventType = "NOTIFICATION_RESULT"
 )
 
 // CurrentSchemaVersion identifica o formato do payload de Event usado pelos producers atuais.
@@ -25,6 +27,7 @@ type Event struct {
 	EventID        string            `json:"event_id"`
 	OrderID        string            `json:"order_id"`
 	SagaID         string            `json:"saga_id,omitempty"`
+	TransactionID  string            `json:"transaction_id,omitempty"`
 	StatusAtual    OrderStatus       `json:"status_atual"`
 	StatusAnterior OrderStatus       `json:"status_anterior,omitempty"`
 	EventType      EventType         `json:"event_type"`

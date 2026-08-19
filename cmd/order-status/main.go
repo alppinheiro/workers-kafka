@@ -37,7 +37,7 @@ func main() {
 func handleTerminalEvent(_ context.Context, event domain.Event) error {
 	switch event.EventType {
 	case domain.EventOrderCompleted, domain.EventOrderFailed:
-		log.Printf("evento terminal: order_id=%s tipo=%s status_atual=%s status_anterior=%s", event.OrderID, event.EventType, event.StatusAtual, event.StatusAnterior)
+		log.Printf("evento terminal: order_id=%s tipo=%s status_atual=%s status_anterior=%s transaction_id=%s metadata=%v", event.OrderID, event.EventType, event.StatusAtual, event.StatusAnterior, event.TransactionID, event.Metadata)
 	}
 
 	return nil

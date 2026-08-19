@@ -13,13 +13,15 @@ const (
 
 // topicForEventType centraliza o roteamento de cada tipo de evento para o tópico correspondente à sua etapa.
 var topicForEventType = map[domain.EventType]string{
-	domain.EventOrderCreated:        TopicOrderCreated,
-	domain.EventOrderCompleted:      TopicOrderStatus,
-	domain.EventOrderFailed:         TopicOrderStatus,
-	domain.EventPaymentCommand:      TopicOrderPayment,
-	domain.EventPaymentResult:       TopicOrderPayment,
-	domain.EventInventoryCommand:    TopicOrderInventory,
-	domain.EventInventoryResult:     TopicOrderInventory,
-	domain.EventNotificationCommand: TopicOrderNotification,
-	domain.EventNotificationResult:  TopicOrderNotification,
+	domain.EventOrderCreated:            TopicOrderCreated,
+	domain.EventOrderCompleted:          TopicOrderStatus,
+	domain.EventOrderFailed:             TopicOrderStatus,
+	domain.EventPaymentCommand:          TopicOrderPayment,
+	domain.EventPaymentCompensate:       TopicOrderPayment,
+	domain.EventPaymentResult:           TopicOrderPayment,
+	domain.EventPaymentCompensateResult: TopicOrderPayment,
+	domain.EventInventoryCommand:        TopicOrderInventory,
+	domain.EventInventoryResult:         TopicOrderInventory,
+	domain.EventNotificationCommand:     TopicOrderNotification,
+	domain.EventNotificationResult:      TopicOrderNotification,
 }
