@@ -128,8 +128,8 @@ flowchart LR
   ORQ --> ON[orders.notification]
   ON --> NOTI[Worker Notification]
   NOTI --> ON
-  ORQ --> OP_COMP[orders.payment (compensate)]
-  OP_COMP --> PAY_COMP[Worker Payment (compensate)]
+  ORQ --> OP_COMP[orders.payment compensate]
+  OP_COMP --> PAY_COMP[Worker Payment compensate]
   PAY_COMP --> OP_COMP
   ORQ --> OS[orders.status]
   OS --> AUD[Order Status Consumer]
