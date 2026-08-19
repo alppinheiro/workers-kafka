@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"time"
 
 	kafkago "github.com/segmentio/kafka-go"
 
 	"workers-kafka/internal/application"
 	"workers-kafka/internal/domain"
 )
+
+const consumerRetryDelay = 2 * time.Second
 
 // ConsumerConfig descreve os tópicos que um Consumer deve acompanhar dentro de um consumer group.
 type ConsumerConfig struct {
@@ -43,6 +47,13 @@ func (c *Consumer) Consume(ctx context.Context, handler application.EventHandler
 	for {
 		msg, err := c.reader.FetchMessage(ctx)
 		if err != nil {
+			if shouldRetryFetch(err) {
+				log.Printf("component=consumer phase=retry-fetch delay=%s error=%v", consumerRetryDelay, err)
+				if waitErr := waitForRetry(ctx, consumerRetryDelay); waitErr != nil {
+					return waitErr
+				}
+				continue
+			}
 			return fmt.Errorf("erro ao ler mensagem: %w", err)
 		}
 
@@ -64,4 +75,22 @@ func (c *Consumer) Consume(ctx context.Context, handler application.EventHandler
 // Close libera os recursos do reader subjacente.
 func (c *Consumer) Close() error {
 	return c.reader.Close()
+}
+
+func shouldRetryFetch(err error) bool {
+	return err == kafkago.GroupCoordinatorNotAvailable ||
+		err == kafkago.NotCoordinatorForGroup ||
+		err == kafkago.GroupLoadInProgress
+}
+
+func waitForRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

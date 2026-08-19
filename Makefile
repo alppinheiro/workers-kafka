@@ -11,7 +11,7 @@ help:
 	@echo "  make vet           - roda go vet no modulo"
 	@echo "  make lint          - roda golangci-lint se estiver disponivel"
 	@echo "  make check         - executa fmt, build, vet e lint em sequencia"
-	@echo "  make up            - sobe Kafka, orquestrador, workers e auditoria"
+	@echo "  make up            - sobe Kafka, orquestrador, workers e auditoria em background"
 	@echo "  make down          - derruba a stack Docker"
 	@echo "  make logs          - segue os logs da stack"
 	@echo "  make ps            - lista os servicos da stack"
@@ -37,7 +37,7 @@ lint:
 check: fmt build vet lint
 
 up:
-	$(COMPOSE) up --build $(SERVICES)
+	$(COMPOSE) up -d --build $(SERVICES)
 
 down:
 	$(COMPOSE) down

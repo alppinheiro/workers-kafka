@@ -262,6 +262,8 @@ Makefile                  atalhos de execução e validação
 
 ### Via Makefile
 
+`make up` sobe a stack em background e devolve o terminal. Para acompanhar a execução, use `make logs`.
+
 ```bash
 make up
 ```
