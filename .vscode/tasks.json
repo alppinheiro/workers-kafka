@@ -1,0 +1,62 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "kafka: up",
+      "type": "shell",
+      "command": "docker-compose up -d kafka kafka-init",
+      "problemMatcher": [],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    {
+      "label": "kafka: down",
+      "type": "shell",
+      "command": "docker-compose down",
+      "problemMatcher": [],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    },
+    {
+      "label": "kafka: logs",
+      "type": "shell",
+      "command": "docker-compose logs -f kafka",
+      "problemMatcher": [],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true
+    },
+    {
+      "label": "order: create",
+      "type": "shell",
+      "command": "go run ./cmd/create-order ${input:orderId}",
+      "problemMatcher": [],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "KAFKA_BROKERS": "localhost:9094"
+        }
+      }
+    },
+    {
+      "label": "make: check",
+      "type": "shell",
+      "command": "make check",
+      "problemMatcher": [],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "orderId",
+      "type": "promptString",
+      "description": "Order ID para disparar o fluxo",
+      "default": "order-debug-001"
+    }
+  ]
+}

@@ -1,0 +1,106 @@
+services:
+  kafka:
+    image: bitnami/kafka:3.9
+    container_name: workers-kafka-broker
+    ports:
+      - "9094:9094"
+    environment:
+      KAFKA_CFG_NODE_ID: "0"
+      KAFKA_CFG_PROCESS_ROLES: controller,broker
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      KAFKA_CFG_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  kafka-init:
+    image: bitnami/kafka:3.9
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+    command: >-
+      /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.created --partitions 1 --replication-factor 1 &&
+      /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.payment --partitions 1 --replication-factor 1 &&
+      /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.inventory --partitions 1 --replication-factor 1 &&
+      /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.notification --partitions 1 --replication-factor 1 &&
+      /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.status --partitions 1 --replication-factor 1
+    restart: "no"
+
+  orchestrator:
+    build:
+      context: .
+      args:
+        TARGET: cmd/orchestrator
+    environment:
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+
+  worker-payment:
+    build:
+      context: .
+      args:
+        TARGET: cmd/worker-payment
+    environment:
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+
+  worker-inventory:
+    build:
+      context: .
+      args:
+        TARGET: cmd/worker-inventory
+    environment:
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+
+  worker-notification:
+    build:
+      context: .
+      args:
+        TARGET: cmd/worker-notification
+    environment:
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+
+  order-status:
+    build:
+      context: .
+      args:
+        TARGET: cmd/order-status
+    environment:
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+
+  create-order:
+    build:
+      context: .
+      args:
+        TARGET: cmd/create-order
+    environment:
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    profiles:
+      - tools

@@ -1,0 +1,95 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Orchestrator",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/cmd/orchestrator",
+      "env": {
+        "KAFKA_BROKERS": "localhost:9094"
+      },
+      "preLaunchTask": "kafka: up"
+    },
+    {
+      "name": "Debug Worker Payment",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/cmd/worker-payment",
+      "env": {
+        "KAFKA_BROKERS": "localhost:9094"
+      },
+      "preLaunchTask": "kafka: up"
+    },
+    {
+      "name": "Debug Worker Inventory",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/cmd/worker-inventory",
+      "env": {
+        "KAFKA_BROKERS": "localhost:9094"
+      },
+      "preLaunchTask": "kafka: up"
+    },
+    {
+      "name": "Debug Worker Notification",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/cmd/worker-notification",
+      "env": {
+        "KAFKA_BROKERS": "localhost:9094"
+      },
+      "preLaunchTask": "kafka: up"
+    },
+    {
+      "name": "Debug Order Status",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/cmd/order-status",
+      "env": {
+        "KAFKA_BROKERS": "localhost:9094"
+      },
+      "preLaunchTask": "kafka: up"
+    },
+    {
+      "name": "Create Order Event",
+      "type": "go",
+      "request": "launch",
+      "mode": "debug",
+      "program": "${workspaceFolder}/cmd/create-order",
+      "args": [
+        "${input:orderId}"
+      ],
+      "env": {
+        "KAFKA_BROKERS": "localhost:9094"
+      },
+      "preLaunchTask": "kafka: up"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Debug Saga End-to-End",
+      "configurations": [
+        "Debug Orchestrator",
+        "Debug Worker Payment",
+        "Debug Worker Inventory",
+        "Debug Worker Notification",
+        "Debug Order Status"
+      ],
+      "stopAll": true
+    }
+  ],
+  "inputs": [
+    {
+      "id": "orderId",
+      "type": "promptString",
+      "description": "Order ID para disparar o fluxo",
+      "default": "order-debug-001"
+    }
+  ]
+}
