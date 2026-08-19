@@ -93,10 +93,10 @@ func (p *Producer) Publish(ctx context.Context, event domain.Event) error {
 		time.Since(startedAt),
 	)
 
-// Also log transaction id when present for better observability
-if event.TransactionID != "" {
-    log.Printf("component=producer transaction_id=%s event_id=%s order_id=%s type=%s", event.TransactionID, event.EventID, event.OrderID, event.EventType)
-}
+	// Also log transaction id when present for better observability
+	if event.TransactionID != "" {
+		log.Printf("component=producer transaction_id=%s event_id=%s order_id=%s type=%s", event.TransactionID, event.EventID, event.OrderID, event.EventType)
+	}
 
 	return nil
 }

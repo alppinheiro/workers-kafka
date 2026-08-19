@@ -55,11 +55,18 @@ func (uc *PaymentUseCase) Handle(ctx context.Context, event domain.Event) error 
 
 	case domain.EventPaymentCompensate:
 		// comando de estorno assíncrono
+		if event.StatusAtual != domain.StatusPaymentRefundPending {
+			return fmt.Errorf("comando de estorno inválido para o pedido %s: status esperado %s, recebido %s", event.OrderID, domain.StatusPaymentRefundPending, event.StatusAtual)
+		}
+		if event.TransactionID == "" {
+			return fmt.Errorf("comando de estorno inválido para o pedido %s: transaction_id ausente", event.OrderID)
+		}
+
 		result := domain.Event{
 			EventID:        domain.NewEventID(),
 			OrderID:        event.OrderID,
 			SagaID:         event.SagaID,
-			StatusAnterior: event.StatusAnterior,
+			StatusAnterior: event.StatusAtual,
 			EventType:      domain.EventPaymentCompensateResult,
 			SchemaVersion:  domain.CurrentSchemaVersion,
 			CreatedAt:      time.Now().UTC(),

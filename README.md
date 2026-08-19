@@ -12,6 +12,7 @@ Arquitetura implementada neste projeto:
 
 - saga orquestrada com orquestrador central
 - workers independentes para pagamento, estoque e notificação
+- compensação assíncrona de pagamento quando o estoque falha após aprovação
 - Kafka como barramento entre comandos, resultados e eventos finais
 - execução local com Docker Compose
 - debug ponta a ponta com VS Code e logs correlacionados
@@ -28,6 +29,7 @@ Leituras mais úteis neste README:
 
 - saga orquestrada com fluxo explícito de sucesso, retry e falha
 - workers isolados por etapa: pagamento, estoque e notificação
+- estorno de pagamento assíncrono com `transaction_id` para compensação
 - Kafka como barramento de eventos entre os processos
 - eventos terminais publicados separadamente para auditoria
 - cenários determinísticos por `order_id` para reproduzir falhas e retries
@@ -165,10 +167,10 @@ sequenceDiagram
     K->>S: ORDER_COMPLETED
 ```
 
-  ### Fluxo com falha no estoque (compensação)
+### Fluxo com falha no estoque (compensação)
 
-  ```mermaid
-  sequenceDiagram
+```mermaid
+sequenceDiagram
     participant C as create-order
     participant K as Kafka
     participant O as Orchestrator
@@ -191,7 +193,7 @@ sequenceDiagram
     K->>PC: PAYMENT_COMPENSATE
     PC->>K: PAYMENT_COMPENSATE_RESULT / PAYMENT_REFUNDED
     K->>O: PAYMENT_COMPENSATE_RESULT
-    O->>K: ORDER_FAILED / FAILED
+    O->>K: ORDER_FAILED / FAILED + payment_refunded=true
     K->>S: ORDER_FAILED
   ```
 
@@ -203,20 +205,22 @@ flowchart TD
     B --> C{PAYMENT_RESULT}
     C -->|PAYMENT_APPROVED| D[INVENTORY_COMMAND]
     C -->|RETRYING| B
-  C -->|FAILED| Z1[ORDER_FAILED]
+    C -->|FAILED| Z1[ORDER_FAILED]
 
-  D --> E{INVENTORY_RESULT}
-  E -->|INVENTORY_RESERVED| F[NOTIFICATION_COMMAND]
-  E -->|RETRYING| D
-  E -->|FAILED| Z3[ORDER_FAILED + REQUEST PAYMENT_COMPENSATE]
+    D --> E{INVENTORY_RESULT}
+    E -->|INVENTORY_RESERVED| F[NOTIFICATION_COMMAND]
+    E -->|RETRYING| D
+    E -->|FAILED| H[PAYMENT_COMPENSATE]
 
-  Z3 --> H[Orchestrator publishes PAYMENT_COMPENSATE (transaction_id) and ORDER_FAILED]
-  H --> I[Worker Payment processes PAYMENT_COMPENSATE -> PAYMENT_REFUNDED]
+    H --> I{PAYMENT_COMPENSATE_RESULT}
+    I -->|PAYMENT_REFUNDED| Z3[ORDER_FAILED + payment_refunded=true]
+    I -->|RETRYING| H
+    I -->|FAILED| Z4[ORDER_FAILED + payment_refund_failed=true]
 
-  F --> G{NOTIFICATION_RESULT}
-  G -->|NOTIFIED| Z2[ORDER_COMPLETED]
-  G -->|RETRYING| F
-  G -->|FAILED| Z4[ORDER_COMPLETED (notification_error=true)]
+    F --> G{NOTIFICATION_RESULT}
+    G -->|NOTIFIED| Z2[ORDER_COMPLETED]
+    G -->|RETRYING| F
+    G -->|FAILED| Z5[ORDER_COMPLETED (notification_error=true)]
 ```
 
 ## Status do Pedido
@@ -224,6 +228,7 @@ flowchart TD
 - `PENDING`: pedido criado
 - `PAYMENT_PENDING`: aguardando processamento de pagamento
 - `PAYMENT_APPROVED`: pagamento aprovado
+- `PAYMENT_REFUND_PENDING`: estorno em andamento antes do encerramento da saga
 - `PAYMENT_REFUNDED`: pagamento estornado/compensado
 - `INVENTORY_RESERVED`: estoque reservado
 - `NOTIFIED`: notificação concluída
@@ -380,6 +385,7 @@ Os consumers registram:
 - `event_id`
 - `order_id`
 - `saga_id`
+- `transaction_id`
 - `type`
 - `status_previous`
 - `status_current`
@@ -396,6 +402,7 @@ O producer registra:
 - `phase=failed`
 - `topic`
 - `payload_bytes`
+- `transaction_id` quando presente
 - todos os campos de correlação do evento
 
 ### Logs de decisão do orquestrador
@@ -420,13 +427,14 @@ O orquestrador registra ações como:
 | --- | --- | --- |
 | Sucesso completo | pagamento, estoque e notificação concluem com sucesso | `ORDER_COMPLETED` / `COMPLETED` |
 | Falha definitiva no pagamento | pagamento retorna `FAILED` | `ORDER_FAILED` / `FAILED` |
-| Falha definitiva no estoque (após pagamento aprovado) | estoque retorna `FAILED`; orquestrador publica `ORDER_FAILED` e solicita `PAYMENT_COMPENSATE` assíncrono com `transaction_id` | `ORDER_FAILED` / `FAILED` (estorno solicitado assíncrono)
+| Falha definitiva no estoque (após pagamento aprovado) | estoque retorna `FAILED`; orquestrador solicita `PAYMENT_COMPENSATE` assíncrono com `transaction_id` e só finaliza após `PAYMENT_COMPENSATE_RESULT` | `ORDER_FAILED` / `FAILED` com metadata de estorno |
 | Falha definitiva na notificação | notificação retorna `FAILED` (não houve erro em etapas anteriores) | `ORDER_COMPLETED` / `COMPLETED` + metadata `notification_error=true` |
 | Falha temporária com recuperação | uma etapa retorna `RETRYING` e depois conclui | saga continua até sucesso ou nova decisão |
-| Falha temporária até estourar retry | a etapa continua falhando temporariamente | `ORDER_FAILED` / `FAILED` |
+| Falha temporária até estourar retry em pagamento ou estoque | a etapa continua falhando temporariamente | `ORDER_FAILED` / `FAILED` |
+| Falha temporária até estourar retry em notificação | a notificação continua falhando temporariamente | `ORDER_COMPLETED` / `COMPLETED` + metadata `notification_error=true` |
 | Evento fora de ordem | resultado chega incompatível com o estado atual | evento rejeitado e saga não avança |
 
-> Observação: quando aplicável, o orquestrador solicita um estorno assíncrono (`PAYMENT_COMPENSATE`) usando o `transaction_id` retornado no `PAYMENT_RESULT`. A compensação é processada por `worker-payment` sem bloquear a emissão do evento terminal; o `transaction_id` permite auditoria e correlação entre pagamento e estorno.
+> Observação: quando aplicável, o orquestrador solicita um estorno assíncrono (`PAYMENT_COMPENSATE`) usando o `transaction_id` retornado no `PAYMENT_RESULT`. A saga só é encerrada depois do `PAYMENT_COMPENSATE_RESULT`, permitindo que o evento terminal carregue o resultado do estorno para auditoria e comunicação ao usuário.
 
 ### 1. Pedido completado com sucesso
 
@@ -462,9 +470,12 @@ Condição:
 
 Resultado final:
 
-- saga encerrada
-- evento terminal `ORDER_FAILED`
+- saga encerrada com falha para o pedido
+- evento terminal `ORDER_FAILED` emitido apenas após o resultado do estorno
 - status final `FAILED`
+- comando assíncrono `PAYMENT_COMPENSATE` publicado com `transaction_id`
+- estorno processado pelo `worker-payment` antes do encerramento
+- metadata terminal indicando `payment_refunded=true` ou `payment_refund_failed=true`
 
 ### 4. Falha definitiva na notificação
 
@@ -476,9 +487,10 @@ Condição:
 
 Resultado final:
 
-- saga encerrada
-- evento terminal `ORDER_FAILED`
-- status final `FAILED`
+- pedido concluído mesmo com falha de notificação
+- evento terminal `ORDER_COMPLETED`
+- status final `COMPLETED`
+- metadata `notification_error=true`
 
 ### 5. Falha temporária com recuperação
 
@@ -501,9 +513,10 @@ Condição:
 
 Resultado final:
 
-- saga encerrada com `FAILED`
-- evento terminal `ORDER_FAILED`
+- em pagamento ou estoque: saga encerrada com `FAILED`
+- em notificação: pedido concluído com `ORDER_COMPLETED`
 - metadata indicando `retry_limit_exceeded`
+- em retry esgotado de estorno: metadata também indica `payment_refund_failed=true`
 
 ### 7. Evento fora de ordem
 
