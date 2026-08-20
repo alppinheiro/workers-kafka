@@ -1,0 +1,76 @@
+# Plano de Evolução: Order Saga Microservices
+
+Este documento descreve o roadmap técnico para transformar o projeto de estudo em uma implementação resiliente, observável e performática.
+
+## 🗺️ Visão Geral do Roadmap
+
+A evolução foi dividida em 5 fases sequenciais. A ordem é crítica: não otimizamos performance (Fase 5) sem antes ter testes (Fase 1) e observabilidade (Fase 4).
+
+---
+
+## 🛡️ Fase 1: A Rede de Segurança (Testes Automatizados)
+**Objetivo:** Garantir que a lógica de negócio não regrida durante a evolução.
+
+- [ ] **Testes Unitários:**
+    - Validar a máquina de estados do \`orchestrator\`.
+    - Testar a lógica de decisão de retry vs falha definitiva.
+- [ ] **Infraestrutura de Teste:**
+    - Configurar \`testcontainers-go\` para subir Kafka real durante a execução dos testes.
+- [ ] **Testes de Integração:**
+    - Fluxo Feliz: \`PENDING -> COMPLETED\`.
+    - Fluxo de Compensação: \`PAYMENT_APPROVED -> INVENTORY_FAIL -> PAYMENT_REFUNDED\`.
+    - Fluxo de Retry: Validar que o sistema tenta X vezes antes de falhar.
+
+## 💾 Fase 2: A Memória do Sistema (Persistência de Estado)
+**Objetivo:** Eliminar a perda de estado em caso de restart do orquestrador.
+
+- [ ] **Definição de Tecnologia:**
+    - Implementar Redis (K-V store) ou PostgreSQL (Relacional) para salvar o estado da saga.
+- [ ] **Camada de Persistência:**
+    - Criar \`internal/infrastructure/persistence\` com interfaces de \`SagaRepository\`.
+- [ ] **Refatoração do Orquestrador:**
+    - Implementar o padrão: \`Consome Evento -> Recupera Estado do DB -> Processa Lógica -> Salva Novo Estado -> Publica Próximo Evento\`.
+
+## 🧱 Fase 3: O Escudo de Resiliência (Robustez e DLQ)
+**Objetivo:** Garantir a estabilidade do pipeline diante de "poison pills" e duplicidades.
+
+- [ ] **Dead Letter Queues (DLQ):**
+    - Criar tópicos de erro (ex: \`orders.payment.dlq\`).
+    - Mover mensagens que excederam o limite de retry para a DLQ em vez de descartá-las.
+- [ ] **Idempotência:**
+    - Implementar a verificação de \`event_id\` ou \`status_anterior\` no DB para evitar processamento duplo de mensagens.
+- [ ] **Gestão de Erros:**
+    - Diferenciar erros transitórios (Network) de erros definitivos (Business Logic) para decidir sobre o retry.
+
+## 👁️ Fase 4: Os Olhos do Sistema (Observabilidade Distribuída)
+**Objetivo:** Rastrear pedidos em tempo real através de múltiplos workers.
+
+- [ ] **Instrumentação OpenTelemetry:**
+    - Adicionar SDK do OTel ao orquestrador e a todos os workers.
+- [ ] **Context Propagation:**
+    - Implementar a passagem de \`trace_id\` via Kafka Headers.
+- [ ] **Visualização:**
+    - Adicionar container \`Jaeger\` ao \`docker-compose.yml\`.
+    - Validar a visualização do grafo de chamadas de um único \`order_id\`.
+
+## 🚀 Fase 5: O Motor de Alta Performance (Concorrência e Escala)
+**Objetivo:** Maximizar o uso de CPU e aumentar a vazão de pedidos.
+
+- [ ] **Processamento Concorrente:**
+    - Implementar Worker Pools com Goroutines para processar mensagens de forma assíncrona.
+    - Implementar controle de concorrência (semáforos) para não sobrecarregar simuladores externos.
+- [ ] **Otimização de Kafka:**
+    - Aumentar número de partições nos tópicos.
+    - Configurar \`Consumer Groups\` para escala horizontal de workers.
+- [ ] **Benchmarking:**
+    - Comparar métricas de \`Pedidos/Segundo\` da versão sequencial vs concorrente.
+
+---
+
+## 📈 Critérios de Sucesso (Definition of Done)
+
+1. **Resiliência:** O orquestrador pode ser reiniciado no meio de uma saga e ela deve continuar de onde parou.
+2. **Confiabilidade:** Nenhuma mensagem é perdida; falhas definitivas estão visíveis na DLQ.
+3. **Visibilidade:** É possível abrir o Jaeger e ver exatamente quanto tempo cada etapa da saga levou.
+4. **Qualidade:** Qualquer alteração no código é validada por uma suíte de testes automatizados.
+5. **Performance:** O sistema processa múltiplas sagas em paralelo sem condições de corrida (race conditions).
