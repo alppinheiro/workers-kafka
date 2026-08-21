@@ -23,14 +23,16 @@ Projeto de estudo em Go para simular o ciclo de vida de um pedido usando **Saga 
 
 ## 3. Estrutura Obrigatória de Pacotes
 ```text
-cmd/                          # Pontos de entrada da aplicação (workers e orchestrator)
+cmd/                          # Pontos de entrada (workers, orchestrator, projector, outbox-relay, autoscaler, load-generator, ...)
 internal/domain/              # Entidades, status do pedido, enums e regras de negócio centrais
 internal/application/         # Casos de uso, orquestrador da saga e coordenação
 internal/infrastructure/
-  ├── kafka/                  # Producer, consumer, serialização JSON e tópicos
+  ├── kafka/                  # Producer, consumer, tópicos, DLQ e configuração
   ├── external/               # Simuladores das APIs (Pagamento, Estoque, Notificação)
+  ├── outbox/                 # OutboxPublisher (EventPublisher para a tabela outbox)
+  ├── telemetry/              # OpenTelemetry (OTLP + propagação W3C traceparent)
   └── persistence/
-      ├── postgres/           # Banco de escrita: SagaRepository, EventLogRepository
+      ├── postgres/           # Banco de escrita: SagaRepository, EventLogRepository, OutboxRepository
       └── postgres_read/      # Banco de leitura: OrderViewRepository (read model)
 internal/application/
   ├── orchestrator/           # Coordenação da saga (estado persistido)
