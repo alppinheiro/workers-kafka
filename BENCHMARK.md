@@ -54,6 +54,53 @@ Teste com 10.000 pedidos e `AUTOSCALE_HIGH_LAG=200`:
 | 2 relays processando a mesma outbox | **`FOR UPDATE SKIP LOCKED`** (claims) |
 | Consumers single-threaded | **`SAGA_WORKERS`** (Readers concorrentes no mesmo grupo) |
 
+## Benchmark de Throughput — pós Fase 5/6 (medido com Prometheus)
+
+> Preenche a lacuna do benchmark anterior (que media só *backlog residual*): medimos agora
+> **eventos/s reais de processamento por serviço** via `rate()` dos counters Prometheus
+> (`saga_events_processed_total`), com fonte de verdade no Postgres.
+
+### Método
+
+1. Stack limpa (`make up`), tópicos com 4 partições, consumer groups resetados (`--to-latest`).
+2. `TRUNCATE` dos bancos e publicação de **3.000 pedidos** (`load-generator -count 3000 -batch 500`).
+3. Medição: `rate(saga_events_processed_total[<janela>])` no Prometheus + contagem por status no Postgres.
+
+### Resultados — janela de ~128 s
+
+| Cenário | Config | Orquestrador | worker-payment | outbox-relay (pub.) | Sagas 2ª+ onda | COMPLETED |
+|---|---|---|---|---|---|---|
+| **A6** | 1 réplica, `SAGA_WORKERS=1`, 1 relay | 48,6 ev/s | 46,2 ev/s | 49,2 ev/s | 0 | 0 |
+| **B3** | 1 réplica, `SAGA_WORKERS=3`, 1 relay | 47,8 ev/s | 46,0 ev/s | 49,0 ev/s | 0 | 0 |
+| **C3** | 3 réplicas, `SAGA_WORKERS=1`, **2 relays** | 20,3 ev/s¹ | 10,9 ev/s¹ | 40,6 ev/s² | **1.186** | **174** |
+
+¹ Distribuído entre 3 réplicas (Prometheus alterna o target → rate por serviço diluído).
+² 2 relays no mesmo target DNS → medição subestimada (fonte: Postgres).
+
+### Drenagem completa (3.000 pedidos → 100% COMPLETED+FAILED)
+
+| Cenário | Config | Tempo total | COMPLETED | FAILED |
+|---|---|---|---|---|
+| **A7** | 1 réplica, `SAGA_WORKERS=1`, 1 relay | **400 s** | 2.341 | 659 |
+| **C3** | 3 réplicas, `SAGA_WORKERS=1`, 2 relays | **~340 s** | 2.305 | 695 |
+
+### Leitura (o que o teste de goroutines revelou)
+
+- **`SAGA_WORKERS` (goroutines) NÃO muda o throughput no ambiente local**: A6 ≈ B3 (48 vs 47 ev/s).
+  Motivo: o **outbox-relay é o gargalo** — ~49 ev/s = 1 lote de 100 a cada ~2 s, com `MarkPublished`
+  sequencial (1 `UPDATE` por evento) — e ele **não escala com goroutines**.
+- **Escala horizontal (réplicas + 2 relays) adianta o pipeline em ondas**: em 2 min o C3 já tinha
+  174 sagas COMPLETED (A6/B3: 0) e a drenagem total caiu ~15% (400 s → ~340 s).
+- O ganho é limitado porque o **Postgres single-instance** concentra os `MarkPublished` + atualizações
+  das sagas — com 2 relays o gargalo desloca para o banco, não para os consumers.
+
+### ⚠️ Observação — degradação após restart da stack
+
+- A stack que rodava há ~35 min (Fase 6) processou **~330–360 ev/s** (3.000 pedidos, 2.322 COMPLETED
+  em 60 s). Após `docker-compose down -v && make up`, a **mesma stack** caiu para **~48 ev/s** (~7×).
+  Hipóteses a investigar: cadência do `outbox-relay` (lote de 100 a cada ~2 s), latência do Kafka
+  1-broker pós-reinício e concorrência no Colima (2 CPUs / 4 GB).
+
 ## Como reproduzir
 
 ```bash
