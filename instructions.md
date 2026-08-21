@@ -365,6 +365,8 @@ Este fluxo já está consolidado no topo do documento e segue a sequência `PEND
 - A ordem de escrita nos handlers é: Save/Append (estado + journal) → Outbox; a reentrega do Kafka + idempotência cobrem os gaps. A transação atômica única (estado + journal + outbox) é refinamento futuro documentado.
 - Fase 4 (observabilidade) concluída conforme `PHASE_4_PLAN.md`: OpenTelemetry com exporter OTLP para o Jaeger, propagação W3C `traceparent` via Kafka headers (inclusive através da outbox, com coluna `traceparent` reconstruída pelo `outbox-relay`), e um span por evento consumido (`consume <EVENT_TYPE>`).
 - Teste de carga (2000 pedidos): ingestão ~47.000 eventos/s; `outbox-relay` otimizado para publicar em lote (`PublishBatch`). O gargalo restante são os consumers single-threaded → Fase 5 (concorrência com goroutines e mais partições).
+- Fase 5 (escalabilidade de produção) concluída conforme `PHASE_5_PLAN.md` e `BENCHMARK.md`: 4 partições por tópico, `SAGA_WORKERS` (Readers concorrentes no mesmo consumer group), escala horizontal via `--scale` (consumer groups), outbox-relay com `FOR UPDATE SKIP LOCKED` (claims) e autoscaler por lag (análogo local ao KEDA/HPA). Benchmark: 3.000 pedidos/60 s com 1 réplica deixam 2.012 na fila; com 3 réplicas + 2 relays, 164 (~12×).
+- CI/CD (planejado): GitHub Actions com `make check` + testes de integração (services postgres/kafka) + push de imagem para ECR; deploy futuro em EKS via Helm (publicação AWS: EKS/ECS, MSK, RDS).
 
 ## Observação
 

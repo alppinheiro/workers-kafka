@@ -20,6 +20,7 @@ func main() {
 		Brokers: brokers,
 		GroupID: "order-status",
 		Topic:   infrakafka.TopicOrderStatus,
+		Workers: infrakafka.WorkersFromEnv(),
 	})
 	defer func() { _ = consumer.Close() }()
 

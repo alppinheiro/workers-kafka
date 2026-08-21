@@ -73,14 +73,19 @@ A evolução foi dividida em 5 fases sequenciais. A ordem é crítica: não otim
 ## 🚀 Fase 5: O Motor de Alta Performance (Concorrência e Escala)
 **Objetivo:** Maximizar o uso de CPU e aumentar a vazão de pedidos.
 
-- [ ] **Processamento Concorrente:**
-    - Implementar Worker Pools com Goroutines para processar mensagens de forma assíncrona.
-    - Implementar controle de concorrência (semáforos) para não sobrecarregar simuladores externos.
-- [ ] **Otimização de Kafka:**
-    - Aumentar número de partições nos tópicos.
-    - Configurar \`Consumer Groups\` para escala horizontal de workers.
-- [ ] **Benchmarking:**
-    - Comparar métricas de \`Pedidos/Segundo\` da versão sequencial vs concorrente.
+✅ **Concluída** — ver `PHASE_5_PLAN.md` e `BENCHMARK.md`.
+
+- [x] **Processamento Concorrente:**
+    - Implementar Worker Pools com Goroutines para processar mensagens de forma assíncrona (`SAGA_WORKERS`: Readers concorrentes no mesmo consumer group).
+    - Implementar controle de concorrência (semáforos) para não sobrecarregar simuladores externos (`AUTOSCALE_MAX` como teto de réplicas).
+- [x] **Otimização de Kafka:**
+    - Aumentar número de partições nos tópicos (4 partições).
+    - Configurar `Consumer Groups` para escala horizontal de workers (multi-instância via `--scale`).
+- [x] **Benchmarking:**
+    - Comparar métricas de `Pedidos/Segundo` da versão sequencial vs concorrente (`BENCHMARK.md`).
+- [x] **Extras de produção:**
+    - Outbox-relay com `FOR UPDATE SKIP LOCKED` (claims) para escala horizontal.
+    - Autoscaler por lag (análogo local ao KEDA/HPA).
 
 ---
 

@@ -18,6 +18,7 @@ help:
 	@echo "  make ps            - lista os servicos da stack"
 	@echo "  make create-order  - publica um pedido usando ORDER_ID=<id>"
 	@echo "  make inspect       - consulta o read model (order_views) de um pedido no banco de leitura"
+	@echo "  make autoscale     - roda o autoscaler (lag -> docker-compose scale) no host"
 	@echo "  make rebuild       - rebuild da stack antes de subir"
 
 fmt:
@@ -58,6 +59,9 @@ create-order:
 
 inspect:
 	$(COMPOSE) exec postgres-read psql -U saga -d saga_read -c "SELECT order_id, current_status, last_event_type, last_event_at, transaction_id, notification_error, payment_refund_failed FROM order_views WHERE order_id='$(ORDER_ID)'"
+
+autoscale:
+	KAFKA_BROKERS=localhost:9094 go run ./cmd/autoscaler
 
 rebuild:
 	$(COMPOSE) build orchestrator worker-payment worker-inventory worker-notification order-status projector outbox-relay create-order

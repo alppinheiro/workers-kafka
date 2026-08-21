@@ -107,11 +107,16 @@ services:
       - /bin/sh
       - -ec
       - |
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.created --partitions 1 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.payment --partitions 1 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.inventory --partitions 1 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.notification --partitions 1 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.status --partitions 1 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.created --partitions 4 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.payment --partitions 4 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.inventory --partitions 4 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.notification --partitions 4 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.status --partitions 4 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --alter --topic orders.created --partitions 4 || true
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --alter --topic orders.payment --partitions 4 || true
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --alter --topic orders.inventory --partitions 4 || true
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --alter --topic orders.notification --partitions 4 || true
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --alter --topic orders.status --partitions 4 || true
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.created.dlq --partitions 1 --replication-factor 1
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.payment.dlq --partitions 1 --replication-factor 1
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.inventory.dlq --partitions 1 --replication-factor 1
@@ -127,6 +132,7 @@ services:
     environment:
       KAFKA_BROKERS: kafka:9092
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
+      SAGA_WORKERS: ${SAGA_WORKERS:-1}
       DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
     depends_on:
       kafka-init:
@@ -142,6 +148,7 @@ services:
     environment:
       KAFKA_BROKERS: kafka:9092
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
+      SAGA_WORKERS: ${SAGA_WORKERS:-1}
       DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
     depends_on:
       kafka-init:
@@ -157,6 +164,7 @@ services:
     environment:
       KAFKA_BROKERS: kafka:9092
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
+      SAGA_WORKERS: ${SAGA_WORKERS:-1}
       DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
     depends_on:
       kafka-init:
@@ -172,6 +180,7 @@ services:
     environment:
       KAFKA_BROKERS: kafka:9092
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
+      SAGA_WORKERS: ${SAGA_WORKERS:-1}
       DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
     depends_on:
       kafka-init:
@@ -187,6 +196,7 @@ services:
     environment:
       KAFKA_BROKERS: kafka:9092
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
+      SAGA_WORKERS: ${SAGA_WORKERS:-1}
       DATABASE_URL: postgres://saga:saga@postgres-read:5432/saga_read?sslmode=disable
     depends_on:
       kafka-init:
@@ -202,6 +212,7 @@ services:
     environment:
       KAFKA_BROKERS: kafka:9092
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
+      SAGA_WORKERS: ${SAGA_WORKERS:-1}
       DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
     depends_on:
       kafka-init:
@@ -217,6 +228,7 @@ services:
     environment:
       KAFKA_BROKERS: kafka:9092
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
+      SAGA_WORKERS: ${SAGA_WORKERS:-1}
     depends_on:
       kafka-init:
         condition: service_completed_successfully
@@ -229,6 +241,7 @@ services:
     environment:
       KAFKA_BROKERS: kafka:9092
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
+      SAGA_WORKERS: ${SAGA_WORKERS:-1}
     depends_on:
       kafka-init:
         condition: service_completed_successfully

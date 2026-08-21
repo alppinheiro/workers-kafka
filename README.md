@@ -691,6 +691,28 @@ docker-compose exec postgres psql -U saga -d saga -c \
   "SELECT current_status, count(*) FROM sagas WHERE order_id LIKE 'load%' GROUP BY 1 ORDER BY 2 DESC;"
 ```
 
+### Escalabilidade implementada (Fase 5)
+
+- **Partições**: os 5 tópicos do fluxo usam **4 partições** (mesmo N em todos, preservando a
+  correlação por `order_id` via chave de partição).
+- **Concorrência intra-instância**: env **`SAGA_WORKERS`** (default 1 = sequencial). Cada
+  goroutine é um consumidor no mesmo consumer group; o Kafka distribui as partições entre
+  elas. Ex.: `SAGA_WORKERS=4 docker-compose up -d --no-deps --force-recreate orchestrator`.
+- **Escala horizontal**: os serviços usam consumer groups → basta adicionar réplicas:
+  ```bash
+  docker-compose up -d --no-deps --scale orchestrator=3 --scale worker-payment=3 \
+    --scale outbox-relay=2 orchestrator worker-payment outbox-relay
+  ```
+- **Outbox-relay com claims** (`FOR UPDATE SKIP LOCKED`): múltiplas réplicas do relay nunca
+  processam a mesma linha da outbox.
+- **Autoscaler** (análogo local ao KEDA/HPA): observa o **lag** do consumer group e ajusta o
+  nº de réplicas via `docker-compose --scale`. Roda no host:
+  ```bash
+  AUTOSCALE_SERVICE=orchestrator AUTOSCALE_MAX=3 AUTOSCALE_HIGH_LAG=200 make autoscale
+  ```
+- **Resultados**: ver `BENCHMARK.md` (3.000 pedidos/60 s: 1 réplica deixa 2.012 na fila;
+  3 réplicas + 2 relays deixam 164 — throughput ~12× maior).
+
 ## Contrato da Mensagem
 
 Cada evento carrega, no mínimo:

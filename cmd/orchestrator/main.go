@@ -28,6 +28,7 @@ func main() {
 		Brokers:     brokers,
 		GroupID:     "orchestrator",
 		ServiceName: "orchestrator",
+		Workers:     infrakafka.WorkersFromEnv(),
 		Topics: []string{
 			infrakafka.TopicOrderCreated,
 			infrakafka.TopicOrderPayment,

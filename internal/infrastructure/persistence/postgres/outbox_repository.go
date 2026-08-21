@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -42,6 +43,7 @@ ON CONFLICT (event_id) DO NOTHING`
 }
 
 // FetchPending retorna até limit eventos ainda não publicados, em ordem de criação.
+// Mantido para leitura simples (sem claims); use ClaimPending em relays com escala horizontal.
 func (r *OutboxRepository) FetchPending(ctx context.Context, limit int) ([]OutboxEntry, error) {
 	const query = `
 SELECT id, event_id, topic, key, payload, COALESCE(traceparent, '') FROM outbox
@@ -60,6 +62,41 @@ LIMIT $1`
 		var e OutboxEntry
 		if err := rows.Scan(&e.ID, &e.EventID, &e.Topic, &e.Key, &e.Payload, &e.Traceparent); err != nil {
 			return nil, fmt.Errorf("erro ao ler outbox pendente: %w", err)
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+// ClaimPending reserva (claims) até limit eventos para este processador, usando
+// FOR UPDATE SKIP LOCKED: com múltiplas instâncias do relay, cada linha é processada
+// por exatamente um relay. Linhas órfãs (claim antigo sem publicação) são reclamadas
+// após claimTimeout.
+func (r *OutboxRepository) ClaimPending(ctx context.Context, limit int, claimTimeout time.Duration) ([]OutboxEntry, error) {
+	const query = `
+UPDATE outbox
+SET claimed_at = now()
+WHERE id IN (
+    SELECT id FROM outbox
+    WHERE published_at IS NULL
+      AND (claimed_at IS NULL OR claimed_at < now() - $2::interval)
+    ORDER BY id
+    LIMIT $1
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, event_id, topic, key, payload, COALESCE(traceparent, '')`
+
+	rows, err := r.pool.Query(ctx, query, limit, claimTimeout.String())
+	if err != nil {
+		return nil, fmt.Errorf("erro ao reivindicar outbox pendente: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []OutboxEntry
+	for rows.Next() {
+		var e OutboxEntry
+		if err := rows.Scan(&e.ID, &e.EventID, &e.Topic, &e.Key, &e.Payload, &e.Traceparent); err != nil {
+			return nil, fmt.Errorf("erro ao ler outbox reivindicada: %w", err)
 		}
 		entries = append(entries, e)
 	}

@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -13,4 +14,18 @@ func BrokersFromEnv() []string {
 		return []string{"localhost:9092"}
 	}
 	return strings.Split(raw, ",")
+}
+
+// WorkersFromEnv lê o número de goroutines de consumo por instância (SAGA_WORKERS).
+// Default 1 = comportamento sequencial original. Valores < 1 são ignorados.
+func WorkersFromEnv() int {
+	raw := os.Getenv("SAGA_WORKERS")
+	if raw == "" {
+		return 1
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 1
+	}
+	return n
 }

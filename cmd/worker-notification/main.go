@@ -27,6 +27,7 @@ func main() {
 		Brokers:     brokers,
 		GroupID:     "worker-notification",
 		ServiceName: "worker-notification",
+		Workers:     infrakafka.WorkersFromEnv(),
 		Topic:       infrakafka.TopicOrderNotification,
 		DLQWriter:   dlq,
 	})

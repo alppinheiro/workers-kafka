@@ -24,6 +24,7 @@ import (
 const (
 	pollInterval = time.Second
 	batchSize    = 100
+	claimTimeout = 60 * time.Second
 )
 
 // main roda o relé da outbox: lê eventos não publicados da tabela outbox, publica no
@@ -66,7 +67,7 @@ func main() {
 }
 
 func relayOnce(ctx context.Context, outbox *infrapostgres.OutboxRepository, producer *infrakafka.Producer) error {
-	entries, err := outbox.FetchPending(ctx, batchSize)
+	entries, err := outbox.ClaimPending(ctx, batchSize, claimTimeout)
 	if err != nil {
 		return err
 	}

@@ -27,6 +27,7 @@ func main() {
 		Brokers:     brokers,
 		GroupID:     "worker-inventory",
 		ServiceName: "worker-inventory",
+		Workers:     infrakafka.WorkersFromEnv(),
 		Topic:       infrakafka.TopicOrderInventory,
 		DLQWriter:   dlq,
 	})
