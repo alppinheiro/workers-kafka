@@ -135,6 +135,18 @@ com tópico recriado e o **watchdog anti-stall reconecta o reader sozinho** em a
 
 **Validação:** consulta de auditoria < 50 ms; alerta DLQ funcional (teste de disparo).
 
+**✅ Resultado (21/08/2026):**
+- **Correção do Grafana**: o dashboard "Saga - Visão Geral" existia, mas os painéis usavam
+  `datasource.uid="Prometheus"` enquanto o provisionamento não fixava o UID (gerava aleatório) →
+  gráficos vazios. Corrigido com `uid: Prometheus` no `datasource.yml`; dashboard validado via API
+  (10 painéis, datasource health OK, queries retornam dados).
+- **Gauge stale corrigido**: `ResetOrdersPending()` antes de cada coleta (status que somem não
+  mantêm valor antigo).
+- **Novas métricas**: `saga_consumer_lag{group,topic}` (lag real por consumer group via admin do
+  Kafka — validado: lag=294 sob carga) e `saga_outbox_max_age_seconds`.
+- **Alertas**: `SagaDLQGrowth` (DLQ crescente) e `SagaConsumerStalled` (sem progresso com lag)
+  no `prometheus/rules.yml`, carregados (estado inactive).
+
 ### Etapa 7.4 — Transação atômica única (consistência)
 
 - Unificar `Save` (estado) + `Append` (journal) + `Append` (outbox) em **uma transação** por

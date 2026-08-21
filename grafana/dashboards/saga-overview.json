@@ -1,5 +1,7 @@
 {
-  "annotations": { "list": [] },
+  "annotations": {
+    "list": []
+  },
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -9,114 +11,280 @@
     {
       "type": "timeseries",
       "title": "Eventos processados/s por serviço",
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
       "targets": [
-        { "expr": "sum(rate(saga_events_processed_total[1m])) by (service)", "legendFormat": "{{service}}" }
+        {
+          "expr": "sum(rate(saga_events_processed_total[1m])) by (service)",
+          "legendFormat": "{{service}}"
+        }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "ops" },
+        "defaults": {
+          "unit": "ops"
+        },
         "overrides": []
       }
     },
     {
       "type": "timeseries",
       "title": "Latência p95 do handler (s)",
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
       "targets": [
-        { "expr": "histogram_quantile(0.95, sum(rate(saga_process_duration_seconds_bucket[1m])) by (le, service))", "legendFormat": "{{service}}" }
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(saga_process_duration_seconds_bucket[1m])) by (le, service))",
+          "legendFormat": "{{service}}"
+        }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "s" },
+        "defaults": {
+          "unit": "s"
+        },
         "overrides": []
       }
     },
     {
       "type": "timeseries",
       "title": "Erros de processamento/s",
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 7 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
       "targets": [
-        { "expr": "sum(rate(saga_events_failed_total[1m])) by (service)", "legendFormat": "{{service}}" }
+        {
+          "expr": "sum(rate(saga_events_failed_total[1m])) by (service)",
+          "legendFormat": "{{service}}"
+        }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "ops" },
+        "defaults": {
+          "unit": "ops"
+        },
         "overrides": []
       }
     },
     {
       "type": "stat",
       "title": "Eventos na DLQ (5min)",
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 7 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
       "targets": [
-        { "expr": "sum(increase(saga_events_dlq_total[5m]))", "legendFormat": "DLQ" }
+        {
+          "expr": "sum(increase(saga_events_dlq_total[5m]))",
+          "legendFormat": "DLQ"
+        }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "short" },
+        "defaults": {
+          "unit": "short"
+        },
         "overrides": []
       }
     },
     {
       "type": "bargauge",
       "title": "Sagas em fila (pendentes por status)",
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 14 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
       "targets": [
-        { "expr": "saga_orders_pending", "legendFormat": "{{status}}" }
+        {
+          "expr": "saga_orders_pending",
+          "legendFormat": "{{status}}"
+        }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "short" },
+        "defaults": {
+          "unit": "short"
+        },
         "overrides": []
       }
     },
     {
       "type": "stat",
       "title": "Sagas completadas / falhadas",
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 14 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
       "targets": [
-        { "expr": "saga_orders_completed_total", "legendFormat": "COMPLETED" },
-        { "expr": "saga_orders_failed_total", "legendFormat": "FAILED" }
+        {
+          "expr": "saga_orders_completed_total",
+          "legendFormat": "COMPLETED"
+        },
+        {
+          "expr": "saga_orders_failed_total",
+          "legendFormat": "FAILED"
+        }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "short" },
+        "defaults": {
+          "unit": "short"
+        },
         "overrides": []
       }
     },
     {
       "type": "stat",
       "title": "Outbox pendente",
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 21 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 21
+      },
       "targets": [
-        { "expr": "saga_outbox_pending", "legendFormat": "outbox" }
+        {
+          "expr": "saga_outbox_pending",
+          "legendFormat": "outbox"
+        }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "short" },
+        "defaults": {
+          "unit": "short"
+        },
         "overrides": []
       }
     },
     {
       "type": "timeseries",
       "title": "Publicação da outbox/s",
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 21 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 21
+      },
       "targets": [
-        { "expr": "rate(saga_outbox_published_total[1m])", "legendFormat": "outbox/s" }
+        {
+          "expr": "rate(saga_outbox_published_total[1m])",
+          "legendFormat": "outbox/s"
+        }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "ops" },
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Lag por consumer group (mensagens nao processadas)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "targets": [
+        {
+          "expr": "max by (group) (saga_consumer_lag)",
+          "legendFormat": "{{group}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Idade do evento mais antigo na outbox (s)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "targets": [
+        {
+          "expr": "saga_outbox_max_age_seconds",
+          "legendFormat": "idade"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
         "overrides": []
       }
     }
   ],
   "refresh": "5s",
   "schemaVersion": 39,
-  "tags": ["saga"],
-  "templating": { "list": [] },
-  "time": { "from": "now-30m", "to": "now" },
+  "tags": [
+    "saga"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "",
   "title": "Saga - Visão Geral",

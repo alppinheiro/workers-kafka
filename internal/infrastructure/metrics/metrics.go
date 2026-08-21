@@ -65,6 +65,16 @@ var (
 		Name: "saga_orders_failed_total",
 		Help: "Sagas FAILED.",
 	})
+
+	outboxMaxAge = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "saga_outbox_max_age_seconds",
+		Help: "Idade (s) do evento mais antigo ainda não publicado na outbox.",
+	})
+
+	consumerLag = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "saga_consumer_lag",
+		Help: "Lag do consumer group por tópico (mensagens não processadas).",
+	}, []string{"group", "topic"})
 )
 
 func init() {
@@ -73,6 +83,7 @@ func init() {
 		processDuration, eventsPublished,
 		outboxPending, outboxPublished,
 		ordersPending, ordersCompleted, ordersFailed,
+		outboxMaxAge, consumerLag,
 	)
 }
 
@@ -111,12 +122,26 @@ func SetOrdersPending(status string, n int) {
 	ordersPending.WithLabelValues(status).Set(float64(n))
 }
 
+// ResetOrdersPending limpa todos os labels de status pendentes antes de um novo ciclo
+// de coleta, evitando gauges "stale" (status que desapareceram mantendo o valor antigo).
+func ResetOrdersPending() {
+	ordersPending.Reset()
+}
+
 func SetOrdersCompleted(n int) {
 	ordersCompleted.Set(float64(n))
 }
 
 func SetOrdersFailed(n int) {
 	ordersFailed.Set(float64(n))
+}
+
+func SetOutboxMaxAge(seconds float64) {
+	outboxMaxAge.Set(seconds)
+}
+
+func SetConsumerLag(group, topic string, n int64) {
+	consumerLag.WithLabelValues(group, topic).Set(float64(n))
 }
 
 // Serve inicia (em goroutine) um servidor HTTP com /metrics na porta indicada.

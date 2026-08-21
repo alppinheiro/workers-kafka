@@ -234,6 +234,7 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
     depends_on:
       migrations:
         condition: service_completed_successfully
@@ -245,6 +246,7 @@ services:
       - "9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules.yml:/etc/prometheus/rules.yml:ro
     depends_on:
       kafka-init:
         condition: service_completed_successfully

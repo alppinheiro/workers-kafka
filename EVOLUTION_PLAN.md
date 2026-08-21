@@ -117,8 +117,10 @@ fluxo contínuo + rastreabilidade total. Detalhes em `PHASE_7_PLAN.md`.
   offsets acumulados; `UnknownTopicOrPartition` como retry — não derruba mais; **watchdog anti-stall**
   que reconecta o reader em até 45 s). *✅ Orquestrador 216 ev/s; fluxo 2.000/2.000 em 60 s; sobrevive
   a tópico recriado e reconecta sozinho.*
-- [ ] **7.3 Rastreabilidade**: índice de correlação em `saga_events(order_id, created_at)`,
-  lag/idade da outbox no dashboard, alerta de DLQ, journal como "trace de negócio".
+- [x] **7.3 Rastreabilidade**: 
+  - *Correção do Grafana*: dashboard não mostrava gráficos (UID do datasource não fixado) → `uid: Prometheus` no provisionamento; validado com 10 painéis via API.
+  - *Gauge stale corrigido* (`ResetOrdersPending`); novas métricas `saga_consumer_lag{group,topic}` e `saga_outbox_max_age_seconds`; alertas `SagaDLQGrowth` + `SagaConsumerStalled` carregados.
+  - Índice de correlação `saga_events(order_id, created_at)` já existia (migration 000002); journal como "trace de negócio" documentado.
 - [ ] **7.4 Transação atômica única** (estado + journal + outbox em 1 tx) — elimina janelas residuais.
 
 ---

@@ -1,0 +1,20 @@
+groups:
+  - name: saga-alerts
+    rules:
+      - alert: SagaDLQGrowth
+        expr: increase(saga_events_dlq_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Eventos movidos para a DLQ"
+          description: "{{ $labels.topic }} recebeu mensagens na DLQ nos últimos 5 minutos. Verifique o processamento da saga."
+
+      - alert: SagaConsumerStalled
+        expr: rate(saga_events_processed_total[5m]) == 0 and on(service) (saga_consumer_lag > 100)
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Consumer sem progresso com backlog"
+          description: "O serviço {{ $labels.service }} não processou eventos nos últimos 5 minutos e há lag acumulado."
