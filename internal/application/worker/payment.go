@@ -10,16 +10,17 @@ import (
 )
 
 // PaymentUseCase processa o comando de pagamento (e a compensação/estorno) e publica o
-// resultado da etapa, registrando no journal o request/response do gateway.
+// resultado da etapa, registrando no journal o request/response do gateway. Todo o
+// processamento roda em uma única transação (SagaUnitOfWork): journal e outbox são
+// gravados juntos ou nenhum é gravado (rollback).
 type PaymentUseCase struct {
-	gateway   application.PaymentGateway
-	publisher application.EventPublisher
-	eventLog  application.EventLogRepository
+	gateway application.PaymentGateway
+	uow     application.SagaUnitOfWork
 }
 
 // NewPaymentUseCase monta o caso de uso do worker de pagamento a partir de suas dependências.
-func NewPaymentUseCase(gateway application.PaymentGateway, publisher application.EventPublisher, eventLog application.EventLogRepository) *PaymentUseCase {
-	return &PaymentUseCase{gateway: gateway, publisher: publisher, eventLog: eventLog}
+func NewPaymentUseCase(gateway application.PaymentGateway, uow application.SagaUnitOfWork) *PaymentUseCase {
+	return &PaymentUseCase{gateway: gateway, uow: uow}
 }
 
 // Handle consome um evento do tópico de pagamento, ignorando os que não forem comandos,
@@ -30,7 +31,9 @@ func (uc *PaymentUseCase) Handle(ctx context.Context, event domain.Event) error 
 		if event.StatusAtual != domain.StatusPaymentPending {
 			return fmt.Errorf("%w: comando de pagamento inválido para o pedido %s: status esperado %s, recebido %s", application.ErrNonRetryable, event.OrderID, domain.StatusPaymentPending, event.StatusAtual)
 		}
-		return uc.process(ctx, event)
+		return uc.uow.WithTx(ctx, func(tx application.SagaTx) error {
+			return uc.process(ctx, tx, event)
+		})
 
 	case domain.EventPaymentCompensate:
 		// comando de estorno assíncrono
@@ -40,15 +43,17 @@ func (uc *PaymentUseCase) Handle(ctx context.Context, event domain.Event) error 
 		if event.TransactionID == "" {
 			return fmt.Errorf("%w: comando de estorno inválido para o pedido %s: transaction_id ausente", application.ErrNonRetryable, event.OrderID)
 		}
-		return uc.refund(ctx, event)
+		return uc.uow.WithTx(ctx, func(tx application.SagaTx) error {
+			return uc.refund(ctx, tx, event)
+		})
 
 	default:
 		return nil // eventos não relacionados a pagamento não interessam a este worker
 	}
 }
 
-func (uc *PaymentUseCase) process(ctx context.Context, event domain.Event) error {
-	seen, err := alreadyProcessed(ctx, uc.eventLog, componentPayment, event)
+func (uc *PaymentUseCase) process(ctx context.Context, tx application.SagaTx, event domain.Event) error {
+	seen, err := alreadyProcessed(ctx, tx.EventLog, componentPayment, event)
 	if err != nil {
 		return err
 	}
@@ -56,12 +61,12 @@ func (uc *PaymentUseCase) process(ctx context.Context, event domain.Event) error
 		return nil // comando já processado (redelivery)
 	}
 
-	if err := appendLog(ctx, uc.eventLog, componentPayment, event, application.DirectionIn, nil, nil); err != nil {
+	if err := appendLog(ctx, tx.EventLog, componentPayment, event, application.DirectionIn, nil, nil); err != nil {
 		return err
 	}
 
 	requestPayload := map[string]any{"order_id": event.OrderID, "op": "process"}
-	if err := appendLog(ctx, uc.eventLog, componentPayment, event, application.DirectionGatewayRequest, requestPayload, nil); err != nil {
+	if err := appendLog(ctx, tx.EventLog, componentPayment, event, application.DirectionGatewayRequest, requestPayload, nil); err != nil {
 		return err
 	}
 
@@ -71,7 +76,7 @@ func (uc *PaymentUseCase) process(ctx context.Context, event domain.Event) error
 	if err != nil {
 		responsePayload = map[string]any{"error": err.Error()}
 	}
-	if err := appendLog(ctx, uc.eventLog, componentPayment, event, application.DirectionGatewayResponse, nil, responsePayload); err != nil {
+	if err := appendLog(ctx, tx.EventLog, componentPayment, event, application.DirectionGatewayResponse, nil, responsePayload); err != nil {
 		return err
 	}
 
@@ -96,14 +101,14 @@ func (uc *PaymentUseCase) process(ctx context.Context, event domain.Event) error
 		result.StatusAtual = domain.StatusFailed
 	}
 
-	if err := appendLog(ctx, uc.eventLog, componentPayment, result, application.DirectionOut, nil, nil); err != nil {
+	if err := appendLog(ctx, tx.EventLog, componentPayment, result, application.DirectionOut, nil, nil); err != nil {
 		return err
 	}
-	return uc.publisher.Publish(ctx, result)
+	return tx.Publisher.Publish(ctx, result)
 }
 
-func (uc *PaymentUseCase) refund(ctx context.Context, event domain.Event) error {
-	seen, err := alreadyProcessed(ctx, uc.eventLog, componentPayment, event)
+func (uc *PaymentUseCase) refund(ctx context.Context, tx application.SagaTx, event domain.Event) error {
+	seen, err := alreadyProcessed(ctx, tx.EventLog, componentPayment, event)
 	if err != nil {
 		return err
 	}
@@ -111,12 +116,12 @@ func (uc *PaymentUseCase) refund(ctx context.Context, event domain.Event) error 
 		return nil // comando já processado (redelivery)
 	}
 
-	if err := appendLog(ctx, uc.eventLog, componentPayment, event, application.DirectionIn, nil, nil); err != nil {
+	if err := appendLog(ctx, tx.EventLog, componentPayment, event, application.DirectionIn, nil, nil); err != nil {
 		return err
 	}
 
 	requestPayload := map[string]any{"order_id": event.OrderID, "op": "refund", "transaction_id": event.TransactionID}
-	if err := appendLog(ctx, uc.eventLog, componentPayment, event, application.DirectionGatewayRequest, requestPayload, nil); err != nil {
+	if err := appendLog(ctx, tx.EventLog, componentPayment, event, application.DirectionGatewayRequest, requestPayload, nil); err != nil {
 		return err
 	}
 
@@ -126,7 +131,7 @@ func (uc *PaymentUseCase) refund(ctx context.Context, event domain.Event) error 
 	if err != nil {
 		responsePayload = map[string]any{"error": err.Error()}
 	}
-	if err := appendLog(ctx, uc.eventLog, componentPayment, event, application.DirectionGatewayResponse, nil, responsePayload); err != nil {
+	if err := appendLog(ctx, tx.EventLog, componentPayment, event, application.DirectionGatewayResponse, nil, responsePayload); err != nil {
 		return err
 	}
 
@@ -151,8 +156,8 @@ func (uc *PaymentUseCase) refund(ctx context.Context, event domain.Event) error 
 		result.StatusAtual = domain.StatusFailed
 	}
 
-	if err := appendLog(ctx, uc.eventLog, componentPayment, result, application.DirectionOut, nil, nil); err != nil {
+	if err := appendLog(ctx, tx.EventLog, componentPayment, result, application.DirectionOut, nil, nil); err != nil {
 		return err
 	}
-	return uc.publisher.Publish(ctx, result)
+	return tx.Publisher.Publish(ctx, result)
 }

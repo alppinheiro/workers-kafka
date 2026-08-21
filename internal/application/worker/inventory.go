@@ -10,16 +10,16 @@ import (
 )
 
 // InventoryUseCase processa o comando de reserva de estoque e publica o resultado da
-// etapa, registrando no journal o request/response do gateway.
+// etapa, registrando no journal o request/response do gateway. O processamento roda em
+// uma única transação (SagaUnitOfWork): journal e outbox são gravados juntos ou nenhum.
 type InventoryUseCase struct {
-	gateway   application.InventoryGateway
-	publisher application.EventPublisher
-	eventLog  application.EventLogRepository
+	gateway application.InventoryGateway
+	uow     application.SagaUnitOfWork
 }
 
 // NewInventoryUseCase monta o caso de uso do worker de estoque a partir de suas dependências.
-func NewInventoryUseCase(gateway application.InventoryGateway, publisher application.EventPublisher, eventLog application.EventLogRepository) *InventoryUseCase {
-	return &InventoryUseCase{gateway: gateway, publisher: publisher, eventLog: eventLog}
+func NewInventoryUseCase(gateway application.InventoryGateway, uow application.SagaUnitOfWork) *InventoryUseCase {
+	return &InventoryUseCase{gateway: gateway, uow: uow}
 }
 
 // Handle consome um evento do tópico de estoque, ignorando os que não forem comandos,
@@ -33,7 +33,13 @@ func (uc *InventoryUseCase) Handle(ctx context.Context, event domain.Event) erro
 		return fmt.Errorf("%w: comando de estoque inválido para o pedido %s: status esperado %s, recebido %s", application.ErrNonRetryable, event.OrderID, domain.StatusPaymentApproved, event.StatusAtual)
 	}
 
-	seen, err := alreadyProcessed(ctx, uc.eventLog, componentInventory, event)
+	return uc.uow.WithTx(ctx, func(tx application.SagaTx) error {
+		return uc.reserve(ctx, tx, event)
+	})
+}
+
+func (uc *InventoryUseCase) reserve(ctx context.Context, tx application.SagaTx, event domain.Event) error {
+	seen, err := alreadyProcessed(ctx, tx.EventLog, componentInventory, event)
 	if err != nil {
 		return err
 	}
@@ -41,12 +47,12 @@ func (uc *InventoryUseCase) Handle(ctx context.Context, event domain.Event) erro
 		return nil // comando já processado (redelivery)
 	}
 
-	if err := appendLog(ctx, uc.eventLog, componentInventory, event, application.DirectionIn, nil, nil); err != nil {
+	if err := appendLog(ctx, tx.EventLog, componentInventory, event, application.DirectionIn, nil, nil); err != nil {
 		return err
 	}
 
 	requestPayload := map[string]any{"order_id": event.OrderID, "op": "reserve"}
-	if err := appendLog(ctx, uc.eventLog, componentInventory, event, application.DirectionGatewayRequest, requestPayload, nil); err != nil {
+	if err := appendLog(ctx, tx.EventLog, componentInventory, event, application.DirectionGatewayRequest, requestPayload, nil); err != nil {
 		return err
 	}
 
@@ -56,7 +62,7 @@ func (uc *InventoryUseCase) Handle(ctx context.Context, event domain.Event) erro
 	if err != nil {
 		responsePayload = map[string]any{"error": err.Error()}
 	}
-	if err := appendLog(ctx, uc.eventLog, componentInventory, event, application.DirectionGatewayResponse, nil, responsePayload); err != nil {
+	if err := appendLog(ctx, tx.EventLog, componentInventory, event, application.DirectionGatewayResponse, nil, responsePayload); err != nil {
 		return err
 	}
 
@@ -80,8 +86,8 @@ func (uc *InventoryUseCase) Handle(ctx context.Context, event domain.Event) erro
 		result.StatusAtual = domain.StatusFailed
 	}
 
-	if err := appendLog(ctx, uc.eventLog, componentInventory, result, application.DirectionOut, nil, nil); err != nil {
+	if err := appendLog(ctx, tx.EventLog, componentInventory, result, application.DirectionOut, nil, nil); err != nil {
 		return err
 	}
-	return uc.publisher.Publish(ctx, result)
+	return tx.Publisher.Publish(ctx, result)
 }

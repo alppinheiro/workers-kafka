@@ -775,6 +775,8 @@ Serialização atual:
 - journal de eventos (`saga_events`) para rastreabilidade com payloads de request/response
 - banco de leitura com read model (`order_views`) alimentado por projeção via Kafka (CQRS)
 - outbox pattern: eventos decididos vão para a outbox e são publicados pelo `outbox-relay`
+- atomicidade de escrita: estado + journal + outbox em uma única transação (`pgx.Tx`) por
+  evento, via `SagaUnitOfWork` — sem janelas residuais entre as três gravações
 - DLQ: erros definitivos vão para `orders.*.dlq`; idempotência por `event_id`
 - observabilidade distribuída com OpenTelemetry + Jaeger (traces por `order_id`)
 - escalabilidade: 4 partições, `SAGA_WORKERS` (concorrência intra-instância), consumer
@@ -796,6 +798,7 @@ Incluído nesta fase:
 - read model no banco de leitura com serviço `projector`
 - outbox pattern com serviço `outbox-relay`
 - DLQ (tópicos `orders.*.dlq`) e idempotência por `event_id`
+- transação atômica única (estado + journal + outbox no mesmo `pgx.Tx`) via `SagaUnitOfWork`
 - observabilidade distribuída (OpenTelemetry + Jaeger)
 - escalabilidade (4 partições, `SAGA_WORKERS`, multi-instância, outbox com claims, autoscaler)
 - migrations com `golang-migrate` via Docker
@@ -804,13 +807,11 @@ Incluído nesta fase:
 
 ## O Que Este Projeto Ainda Não Faz
 
-- transação atômica única (estado + journal + outbox) — refinamento futuro documentado
 - API REST de consulta de pedido (o read model `order_views` já está pronto para isso)
 - tratamento de produção com políticas avançadas de retry
 
 Fora de escopo nesta fase:
 
-- transação atômica única (estado + journal + outbox)
 - API REST
 - escala horizontal real em Kubernetes (KEDA/HPA)
 
@@ -819,4 +820,3 @@ Fora de escopo nesta fase:
 - CI/CD com GitHub Actions (CI funcional: `make check` + testes de integração + imagem Docker)
 - cloud readiness AWS (Helm/Terraform, EKS/ECS + MSK + RDS; KEDA no lugar do autoscaler local)
 - API REST de consulta de pedido lendo o read model `order_views`
-- transação atômica única (estado + journal + outbox) para eliminar janelas residuais

@@ -11,7 +11,7 @@ import (
 
 func TestInventoryUseCase_Handle_IgnoredEventType(t *testing.T) {
 	pub := &mockPublisher{}
-	uc := NewInventoryUseCase(&mockInventoryGateway{}, pub, &fakeEventLog{})
+	uc := NewInventoryUseCase(&mockInventoryGateway{}, uowWith(pub, &fakeEventLog{}))
 
 	err := uc.Handle(context.Background(), resultEvent("order-001", domain.EventInventoryResult, domain.StatusInventoryReserved))
 	if err != nil {
@@ -24,7 +24,7 @@ func TestInventoryUseCase_Handle_IgnoredEventType(t *testing.T) {
 
 func TestInventoryUseCase_Handle_InvalidStatus(t *testing.T) {
 	pub := &mockPublisher{}
-	uc := NewInventoryUseCase(&mockInventoryGateway{}, pub, &fakeEventLog{})
+	uc := NewInventoryUseCase(&mockInventoryGateway{}, uowWith(pub, &fakeEventLog{}))
 
 	event := resultEvent("order-001", domain.EventInventoryCommand, domain.StatusPending)
 	err := uc.Handle(context.Background(), event)
@@ -36,7 +36,7 @@ func TestInventoryUseCase_Handle_InvalidStatus(t *testing.T) {
 func TestInventoryUseCase_Handle_Reserved(t *testing.T) {
 	pub := &mockPublisher{}
 	gateway := &mockInventoryGateway{reserved: true}
-	uc := NewInventoryUseCase(gateway, pub, &fakeEventLog{})
+	uc := NewInventoryUseCase(gateway, uowWith(pub, &fakeEventLog{}))
 
 	event := resultEvent("order-001", domain.EventInventoryCommand, domain.StatusPaymentApproved)
 	err := uc.Handle(context.Background(), event)
@@ -59,7 +59,7 @@ func TestInventoryUseCase_Handle_Reserved(t *testing.T) {
 func TestInventoryUseCase_Handle_NotReserved(t *testing.T) {
 	pub := &mockPublisher{}
 	gateway := &mockInventoryGateway{reserved: false}
-	uc := NewInventoryUseCase(gateway, pub, &fakeEventLog{})
+	uc := NewInventoryUseCase(gateway, uowWith(pub, &fakeEventLog{}))
 
 	event := resultEvent("order-001", domain.EventInventoryCommand, domain.StatusPaymentApproved)
 	err := uc.Handle(context.Background(), event)
@@ -75,7 +75,7 @@ func TestInventoryUseCase_Handle_NotReserved(t *testing.T) {
 func TestInventoryUseCase_Handle_GatewayError(t *testing.T) {
 	pub := &mockPublisher{}
 	gateway := &mockInventoryGateway{err: errSimulado}
-	uc := NewInventoryUseCase(gateway, pub, &fakeEventLog{})
+	uc := NewInventoryUseCase(gateway, uowWith(pub, &fakeEventLog{}))
 
 	event := resultEvent("order-001", domain.EventInventoryCommand, domain.StatusPaymentApproved)
 	err := uc.Handle(context.Background(), event)

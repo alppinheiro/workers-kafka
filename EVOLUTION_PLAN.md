@@ -121,7 +121,11 @@ fluxo contínuo + rastreabilidade total. Detalhes em `PHASE_7_PLAN.md`.
   - *Correção do Grafana*: dashboard não mostrava gráficos (UID do datasource não fixado) → `uid: Prometheus` no provisionamento; validado com 10 painéis via API.
   - *Gauge stale corrigido* (`ResetOrdersPending`); novas métricas `saga_consumer_lag{group,topic}` e `saga_outbox_max_age_seconds`; alertas `SagaDLQGrowth` + `SagaConsumerStalled` carregados.
   - Índice de correlação `saga_events(order_id, created_at)` já existia (migration 000002); journal como "trace de negócio" documentado.
-- [ ] **7.4 Transação atômica única** (estado + journal + outbox em 1 tx) — elimina janelas residuais.
+- [x] **7.4 Transação atômica única** (estado + journal + outbox em 1 tx):
+  - *`SagaUnitOfWork`*: porta `application.SagaTx` + `application.SagaUnitOfWork`; implementação `internal/infrastructure/uow` com `pgx.Tx` (commit em bloco; rollback em qualquer erro).
+  - *Repositórios transacionais*: `DBTX` (contrato compartilhado por `*pgxpool.Pool` e `pgx.Tx`) + `NewSagaRepositoryTx`/`NewEventLogRepositoryTx`/`NewOutboxRepositoryTx`.
+  - *Handlers atômicos*: orquestrador (`StartOrder`, `HandleResult`) e workers (pagamento/estoque/notificação) processam cada evento dentro de uma única transação — estado, journal e outbox são gravados juntos ou nenhum é gravado.
+  - *Testes de consistência*: `TestUnitOfWork_AtomicCommit` (as 3 tabelas persistem juntas) e `TestUnitOfWork_AtomicRollback` (erro no bloco desfaz tudo) + versão Testcontainers (`TestUnitOfWorkRollbackWithContainer`); `make check` e `make integration` verdes.
 
 ---
 

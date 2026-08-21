@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"workers-kafka/internal/application"
@@ -12,12 +13,18 @@ import (
 
 // EventLogRepository persiste o journal de eventos (append-only) no banco de escrita.
 type EventLogRepository struct {
-	pool *pgxpool.Pool
+	db DBTX
 }
 
 // NewEventLogRepository cria o repositório do journal sobre o pool informado.
 func NewEventLogRepository(pool *pgxpool.Pool) *EventLogRepository {
-	return &EventLogRepository{pool: pool}
+	return &EventLogRepository{db: pool}
+}
+
+// NewEventLogRepositoryTx cria o repositório do journal vinculado a uma transação: as
+// gravações executam dentro do pgx.Tx, junto com estado e outbox (atomicidade).
+func NewEventLogRepositoryTx(tx pgx.Tx) *EventLogRepository {
+	return &EventLogRepository{db: tx}
 }
 
 // Append insere uma linha no journal. A gravação é idempotente por (event_id, component,
@@ -41,7 +48,7 @@ INSERT INTO saga_events (order_id, saga_id, event_id, event_type, component, dir
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (event_id, component, direction) DO NOTHING`
 
-	_, err = r.pool.Exec(ctx, query,
+	_, err = r.db.Exec(ctx, query,
 		entry.OrderID,
 		entry.SagaID,
 		entry.EventID,
@@ -65,7 +72,7 @@ func (r *EventLogRepository) Has(ctx context.Context, eventID string, component 
 	const query = `SELECT EXISTS(SELECT 1 FROM saga_events WHERE event_id = $1 AND component = $2)`
 
 	var exists bool
-	if err := r.pool.QueryRow(ctx, query, eventID, component).Scan(&exists); err != nil {
+	if err := r.db.QueryRow(ctx, query, eventID, component).Scan(&exists); err != nil {
 		return false, fmt.Errorf("erro ao verificar evento %s no journal: %w", eventID, err)
 	}
 	return exists, nil

@@ -11,11 +11,21 @@ import (
 
 // --- helpers de teste -------------------------------------------------------
 
-// newTestOrchestrator cria um orquestrador com mock publisher, repositório de sagas
-// em memória e journal fake, com limite de retries configurável.
+// newTestOrchestrator cria um orquestrador com fakeUoW (repositório de sagas em memória,
+// journal fake e publisher mock), com limite de retries configurável.
 func newTestOrchestrator(maxRetries int) (*Orchestrator, *mockPublisher) {
-	pub := &mockPublisher{}
-	return New(pub, newInMemorySagaRepo(), &fakeEventLog{}, maxRetries), pub
+	uow := &fakeUoW{sagas: newInMemorySagaRepo(), eventLog: &fakeEventLog{}, pub: &mockPublisher{}}
+	return New(uow, maxRetries), uow.pub.(*mockPublisher)
+}
+
+// uowOf recupera o fakeUoW usado pelo orquestrador para acessar os fakes nos testes.
+func uowOf(t *testing.T, o *Orchestrator) *fakeUoW {
+	t.Helper()
+	uow, ok := o.uow.(*fakeUoW)
+	if !ok {
+		t.Fatalf("orquestrador não está usando fakeUoW")
+	}
+	return uow
 }
 
 // resultEvent cria um evento de resultado com valores mínimos para os testes.
@@ -59,7 +69,7 @@ func startOrder(t *testing.T, o *Orchestrator, orderID string) {
 // seedState grava um estado inicial diretamente no repositório de sagas.
 func seedState(t *testing.T, o *Orchestrator, saga domain.Saga) {
 	t.Helper()
-	if err := o.sagas.Save(context.Background(), saga); err != nil {
+	if err := uowOf(t, o).sagas.Save(context.Background(), saga); err != nil {
 		t.Fatalf("seedState falhou: %v", err)
 	}
 }
@@ -67,7 +77,7 @@ func seedState(t *testing.T, o *Orchestrator, saga domain.Saga) {
 // currentState carrega o estado corrente da saga a partir do repositório.
 func currentState(t *testing.T, o *Orchestrator, orderID string) domain.Saga {
 	t.Helper()
-	saga, err := o.sagas.Load(context.Background(), orderID)
+	saga, err := uowOf(t, o).sagas.Load(context.Background(), orderID)
 	if err != nil {
 		t.Fatalf("Load falhou: %v", err)
 	}
@@ -122,7 +132,7 @@ func TestHandleEvent_OrderCreated_StartsSaga(t *testing.T) {
 		t.Fatalf("HandleEvent retornou erro inesperado: %v", err)
 	}
 
-	if _, err := o.sagas.Load(context.Background(), "order-001"); err != nil {
+	if _, err := uowOf(t, o).sagas.Load(context.Background(), "order-001"); err != nil {
 		t.Fatal("saga não foi iniciada a partir do ORDER_CREATED")
 	}
 }
@@ -659,20 +669,22 @@ func TestFullFlow_InventoryFail_TriggersCompensationThenRefund(t *testing.T) {
 
 func TestComplete_PublishFails_ReturnsError(t *testing.T) {
 	pub := &mockFailingPublisher{}
-	o := &Orchestrator{publisher: pub, sagas: newInMemorySagaRepo(), eventLog: &fakeEventLog{}}
+	o := New(&fakeUoW{sagas: newInMemorySagaRepo(), eventLog: &fakeEventLog{}, pub: pub}, 3)
 	saga := domain.Saga{OrderID: "order-001", Current: domain.StatusInventoryReserved}
+	tx := application.SagaTx{Sagas: newInMemorySagaRepo(), EventLog: &fakeEventLog{}, Publisher: pub}
 
-	if err := o.complete(context.Background(), &saga, nil); err == nil {
+	if err := o.complete(context.Background(), tx, &saga, nil); err == nil {
 		t.Fatal("esperado erro quando o publish do ORDER_COMPLETED falha")
 	}
 }
 
 func TestFail_PublishFails_ReturnsError(t *testing.T) {
 	pub := &mockFailingPublisher{}
-	o := &Orchestrator{publisher: pub, sagas: newInMemorySagaRepo(), eventLog: &fakeEventLog{}}
+	o := New(&fakeUoW{sagas: newInMemorySagaRepo(), eventLog: &fakeEventLog{}, pub: pub}, 3)
 	saga := domain.Saga{OrderID: "order-001", Current: domain.StatusPaymentPending}
+	tx := application.SagaTx{Sagas: newInMemorySagaRepo(), EventLog: &fakeEventLog{}, Publisher: pub}
 
-	if err := o.fail(context.Background(), &saga, nil); err == nil {
+	if err := o.fail(context.Background(), tx, &saga, nil); err == nil {
 		t.Fatal("esperado erro quando o publish do ORDER_FAILED falha")
 	}
 }
@@ -680,7 +692,7 @@ func TestFail_PublishFails_ReturnsError(t *testing.T) {
 // --- casos de erro no repositório e no journal -------------------------------------
 
 func TestStartOrder_RepoLoadError_ReturnsError(t *testing.T) {
-	o := &Orchestrator{publisher: &mockPublisher{}, sagas: &mockFailingSagaRepo{}, eventLog: &fakeEventLog{}}
+	o := New(&fakeUoW{sagas: &mockFailingSagaRepo{}, eventLog: &fakeEventLog{}, pub: &mockPublisher{}}, 3)
 
 	if err := o.StartOrder(context.Background(), resultEvent("order-001", domain.EventOrderCreated, domain.StatusPending)); err == nil {
 		t.Fatal("esperado erro quando o load da saga falha")
@@ -688,7 +700,7 @@ func TestStartOrder_RepoLoadError_ReturnsError(t *testing.T) {
 }
 
 func TestHandleResult_RepoLoadError_ReturnsError(t *testing.T) {
-	o := &Orchestrator{publisher: &mockPublisher{}, sagas: &mockFailingSagaRepo{}, eventLog: &fakeEventLog{}}
+	o := New(&fakeUoW{sagas: &mockFailingSagaRepo{}, eventLog: &fakeEventLog{}, pub: &mockPublisher{}}, 3)
 
 	event := resultEvent("order-001", domain.EventPaymentResult, domain.StatusPaymentApproved)
 	if err := o.HandleResult(context.Background(), event); err == nil {
@@ -697,7 +709,7 @@ func TestHandleResult_RepoLoadError_ReturnsError(t *testing.T) {
 }
 
 func TestStartOrder_EventLogFailure_ReturnsError(t *testing.T) {
-	o := &Orchestrator{publisher: &mockPublisher{}, sagas: newInMemorySagaRepo(), eventLog: &mockFailingEventLog{}}
+	o := New(&fakeUoW{sagas: newInMemorySagaRepo(), eventLog: &mockFailingEventLog{}, pub: &mockPublisher{}}, 3)
 
 	if err := o.StartOrder(context.Background(), resultEvent("order-001", domain.EventOrderCreated, domain.StatusPending)); err == nil {
 		t.Fatal("esperado erro quando a gravação do journal falha")
@@ -705,7 +717,7 @@ func TestStartOrder_EventLogFailure_ReturnsError(t *testing.T) {
 }
 
 func TestHandleResult_EventLogFailure_ReturnsError(t *testing.T) {
-	o := &Orchestrator{publisher: &mockPublisher{}, sagas: newInMemorySagaRepo(), eventLog: &mockFailingEventLog{}}
+	o := New(&fakeUoW{sagas: newInMemorySagaRepo(), eventLog: &mockFailingEventLog{}, pub: &mockPublisher{}}, 3)
 	seedState(t, o, domain.Saga{OrderID: "order-001", Current: domain.StatusPaymentPending})
 
 	event := resultEvent("order-001", domain.EventPaymentResult, domain.StatusPaymentApproved)
@@ -716,9 +728,11 @@ func TestHandleResult_EventLogFailure_ReturnsError(t *testing.T) {
 
 func TestStartOrder_DispatchNextUnknownState(t *testing.T) {
 	o, pub := newTestOrchestrator(3)
+	uow := uowOf(t, o)
+	tx := application.SagaTx{Sagas: uow.sagas, EventLog: uow.eventLog, Publisher: uow.pub}
 	saga := domain.Saga{OrderID: "order-001", Current: domain.StatusCompleted}
 
-	if err := o.dispatchNext(context.Background(), &saga); err == nil {
+	if err := o.dispatchNext(context.Background(), tx, &saga); err == nil {
 		t.Fatal("esperado erro quando o estado não tem próxima etapa")
 	}
 	if len(pub.events) != 0 {
@@ -730,7 +744,7 @@ func TestStartOrder_DispatchNextUnknownState(t *testing.T) {
 
 func TestStartOrder_LogsOrderCreatedIn(t *testing.T) {
 	o, _ := newTestOrchestrator(3)
-	log := o.eventLog.(*fakeEventLog)
+	log := uowOf(t, o).eventLog.(*fakeEventLog)
 
 	event := resultEvent("order-001", domain.EventOrderCreated, domain.StatusPending)
 	if err := o.StartOrder(context.Background(), event); err != nil {
@@ -752,7 +766,7 @@ func TestStartOrder_LogsOrderCreatedIn(t *testing.T) {
 
 func TestHandleResult_LogsResultInAndCommandOut(t *testing.T) {
 	o, _ := newTestOrchestrator(3)
-	log := o.eventLog.(*fakeEventLog)
+	log := uowOf(t, o).eventLog.(*fakeEventLog)
 	startOrder(t, o, "order-001")
 
 	event := resultEvent("order-001", domain.EventPaymentResult, domain.StatusPaymentApproved)
@@ -780,7 +794,7 @@ func TestHandleResult_LogsResultInAndCommandOut(t *testing.T) {
 
 func TestFail_LogsTerminalOut(t *testing.T) {
 	o, _ := newTestOrchestrator(3)
-	log := o.eventLog.(*fakeEventLog)
+	log := uowOf(t, o).eventLog.(*fakeEventLog)
 	seedState(t, o, domain.Saga{OrderID: "order-001", Current: domain.StatusPaymentPending})
 
 	event := resultEvent("order-001", domain.EventPaymentResult, domain.StatusFailed)

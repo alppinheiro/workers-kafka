@@ -5,20 +5,36 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"workers-kafka/internal/application"
 	"workers-kafka/internal/domain"
 )
 
+// DBTX é o contrato mínimo de execução SQL compartilhado por *pgxpool.Pool (execução
+// avulsa) e pgx.Tx (transação). Com ele os repositórios operam tanto fora quanto dentro
+// de uma transação, habilitando a atomicidade de escrita (estado + journal + outbox).
+type DBTX interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // SagaRepository persiste o estado corrente da saga no banco de escrita.
 type SagaRepository struct {
-	pool *pgxpool.Pool
+	db DBTX
 }
 
 // NewSagaRepository cria o repositório de sagas sobre o pool informado.
 func NewSagaRepository(pool *pgxpool.Pool) *SagaRepository {
-	return &SagaRepository{pool: pool}
+	return &SagaRepository{db: pool}
+}
+
+// NewSagaRepositoryTx cria o repositório de sagas vinculado a uma transação: todas as
+// operações executam dentro do pgx.Tx, junto com journal e outbox (atomicidade).
+func NewSagaRepositoryTx(tx pgx.Tx) *SagaRepository {
+	return &SagaRepository{db: tx}
 }
 
 // Save insere ou atualiza (upsert) o estado da saga identificada por OrderID.
@@ -33,7 +49,7 @@ ON CONFLICT (order_id) DO UPDATE SET
 	transaction_id  = EXCLUDED.transaction_id,
 	updated_at      = now()`
 
-	_, err := r.pool.Exec(ctx, query,
+	_, err := r.db.Exec(ctx, query,
 		saga.OrderID,
 		string(saga.Current),
 		string(saga.Previous),
@@ -54,7 +70,7 @@ FROM sagas
 WHERE order_id = $1`
 
 	var saga domain.Saga
-	err := r.pool.QueryRow(ctx, query, orderID).Scan(
+	err := r.db.QueryRow(ctx, query, orderID).Scan(
 		&saga.OrderID,
 		&saga.Previous,
 		&saga.Current,

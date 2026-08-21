@@ -11,21 +11,13 @@ import (
 	"workers-kafka/internal/application/orchestrator"
 	"workers-kafka/internal/domain"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
+	"workers-kafka/internal/infrastructure/uow"
 )
 
 // Este arquivo prova a persistência real do fluxo da saga: orquestrador com os
 // repositórios PostgreSQL reais, verificando que TODOS os eventos de cada etapa são
 // gravados em saga_events e o estado final em sagas. Requer DATABASE_URL (migrations
 // aplicadas); sem a variável, os testes são pulados.
-
-type capturingPublisher struct {
-	events []domain.Event
-}
-
-func (p *capturingPublisher) Publish(_ context.Context, event domain.Event) error {
-	p.events = append(p.events, event)
-	return nil
-}
 
 func newFlowPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -45,7 +37,7 @@ func newFlowPool(t *testing.T) *pgxpool.Pool {
 func cleanFlowTables(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
-	for _, table := range []string{"saga_events", "sagas"} {
+	for _, table := range []string{"saga_events", "sagas", "outbox"} {
 		if _, err := pool.Exec(ctx, "DELETE FROM "+table); err != nil {
 			t.Fatalf("falha ao limpar %s: %v", table, err)
 		}
@@ -108,10 +100,7 @@ func TestFlowPersistence_Success(t *testing.T) {
 	cleanFlowTables(t, pool)
 	ctx := context.Background()
 
-	pub := &capturingPublisher{}
-	orch := orchestrator.New(pub,
-		infrapostgres.NewSagaRepository(pool),
-		infrapostgres.NewEventLogRepository(pool), 3)
+	orch := orchestrator.New(uow.New(pool), 3)
 
 	orderID := "order-flow-ok"
 	if err := orch.StartOrder(ctx, flowEvent(orderID, "e-created", domain.EventOrderCreated, domain.StatusPending, "")); err != nil {
@@ -159,10 +148,7 @@ func TestFlowPersistence_Compensation(t *testing.T) {
 	cleanFlowTables(t, pool)
 	ctx := context.Background()
 
-	pub := &capturingPublisher{}
-	orch := orchestrator.New(pub,
-		infrapostgres.NewSagaRepository(pool),
-		infrapostgres.NewEventLogRepository(pool), 3)
+	orch := orchestrator.New(uow.New(pool), 3)
 
 	orderID := "order-flow-comp"
 	if err := orch.StartOrder(ctx, flowEvent(orderID, "e-created", domain.EventOrderCreated, domain.StatusPending, "")); err != nil {
@@ -210,10 +196,7 @@ func TestFlowPersistence_RetryOnce(t *testing.T) {
 	cleanFlowTables(t, pool)
 	ctx := context.Background()
 
-	pub := &capturingPublisher{}
-	orch := orchestrator.New(pub,
-		infrapostgres.NewSagaRepository(pool),
-		infrapostgres.NewEventLogRepository(pool), 3)
+	orch := orchestrator.New(uow.New(pool), 3)
 
 	orderID := "order-flow-retry"
 	if err := orch.StartOrder(ctx, flowEvent(orderID, "e-created", domain.EventOrderCreated, domain.StatusPending, "")); err != nil {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -20,12 +21,18 @@ type OutboxEntry struct {
 
 // OutboxRepository persiste eventos a publicar no Kafka (Outbox Pattern).
 type OutboxRepository struct {
-	pool *pgxpool.Pool
+	db DBTX
 }
 
 // NewOutboxRepository cria o repositório da outbox sobre o pool informado.
 func NewOutboxRepository(pool *pgxpool.Pool) *OutboxRepository {
-	return &OutboxRepository{pool: pool}
+	return &OutboxRepository{db: pool}
+}
+
+// NewOutboxRepositoryTx cria o repositório da outbox vinculado a uma transação: o Append
+// executa dentro do pgx.Tx, junto com estado e journal (atomicidade).
+func NewOutboxRepositoryTx(tx pgx.Tx) *OutboxRepository {
+	return &OutboxRepository{db: tx}
 }
 
 // Append insere um evento na outbox. A gravação é idempotente por event_id (UNIQUE).
@@ -35,7 +42,7 @@ INSERT INTO outbox (event_id, topic, key, payload, traceparent)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (event_id) DO NOTHING`
 
-	_, err := r.pool.Exec(ctx, query, entry.EventID, entry.Topic, entry.Key, entry.Payload, entry.Traceparent)
+	_, err := r.db.Exec(ctx, query, entry.EventID, entry.Topic, entry.Key, entry.Payload, entry.Traceparent)
 	if err != nil {
 		return fmt.Errorf("erro ao gravar evento %s na outbox: %w", entry.EventID, err)
 	}
@@ -51,7 +58,7 @@ WHERE published_at IS NULL
 ORDER BY id
 LIMIT $1`
 
-	rows, err := r.pool.Query(ctx, query, limit)
+	rows, err := r.db.Query(ctx, query, limit)
 	if err != nil {
 		return nil, fmt.Errorf("erro ao consultar outbox pendente: %w", err)
 	}
@@ -86,7 +93,7 @@ WHERE id IN (
 )
 RETURNING id, event_id, topic, key, payload, COALESCE(traceparent, '')`
 
-	rows, err := r.pool.Query(ctx, query, limit, claimTimeout.String())
+	rows, err := r.db.Query(ctx, query, limit, claimTimeout.String())
 	if err != nil {
 		return nil, fmt.Errorf("erro ao reivindicar outbox pendente: %w", err)
 	}
@@ -108,7 +115,7 @@ func (r *OutboxRepository) CountPending(ctx context.Context) (int, error) {
 	const query = `SELECT count(*) FROM outbox WHERE published_at IS NULL`
 
 	var n int
-	if err := r.pool.QueryRow(ctx, query).Scan(&n); err != nil {
+	if err := r.db.QueryRow(ctx, query).Scan(&n); err != nil {
 		return 0, fmt.Errorf("erro ao contar outbox pendente: %w", err)
 	}
 	return n, nil
@@ -118,7 +125,7 @@ func (r *OutboxRepository) CountPending(ctx context.Context) (int, error) {
 func (r *OutboxRepository) MarkPublished(ctx context.Context, id int64) error {
 	const query = `UPDATE outbox SET published_at = now() WHERE id = $1`
 
-	if _, err := r.pool.Exec(ctx, query, id); err != nil {
+	if _, err := r.db.Exec(ctx, query, id); err != nil {
 		return fmt.Errorf("erro ao marcar outbox %d como publicado: %w", id, err)
 	}
 	return nil
@@ -132,7 +139,7 @@ func (r *OutboxRepository) MarkPublishedBatch(ctx context.Context, ids []int64) 
 	}
 	const query = `UPDATE outbox SET published_at = now() WHERE id = ANY($1)`
 
-	if _, err := r.pool.Exec(ctx, query, ids); err != nil {
+	if _, err := r.db.Exec(ctx, query, ids); err != nil {
 		return fmt.Errorf("erro ao marcar lote da outbox como publicado: %w", err)
 	}
 	return nil
@@ -143,7 +150,7 @@ func (r *OutboxRepository) MarkPublishedBatch(ctx context.Context, ids []int64) 
 func (r *OutboxRepository) PurgePublished(ctx context.Context, olderThan time.Duration) (int64, error) {
 	const query = `DELETE FROM outbox WHERE published_at IS NOT NULL AND published_at < now() - $1::interval`
 
-	tag, err := r.pool.Exec(ctx, query, olderThan.String())
+	tag, err := r.db.Exec(ctx, query, olderThan.String())
 	if err != nil {
 		return 0, fmt.Errorf("erro ao purgar outbox publicada: %w", err)
 	}

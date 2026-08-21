@@ -10,16 +10,16 @@ import (
 )
 
 // NotificationUseCase processa o comando de notificação e publica o encerramento da
-// etapa, registrando no journal o request/response do gateway.
+// etapa, registrando no journal o request/response do gateway. O processamento roda em
+// uma única transação (SagaUnitOfWork): journal e outbox são gravados juntos ou nenhum.
 type NotificationUseCase struct {
-	gateway   application.NotificationGateway
-	publisher application.EventPublisher
-	eventLog  application.EventLogRepository
+	gateway application.NotificationGateway
+	uow     application.SagaUnitOfWork
 }
 
 // NewNotificationUseCase monta o caso de uso do worker de notificação a partir de suas dependências.
-func NewNotificationUseCase(gateway application.NotificationGateway, publisher application.EventPublisher, eventLog application.EventLogRepository) *NotificationUseCase {
-	return &NotificationUseCase{gateway: gateway, publisher: publisher, eventLog: eventLog}
+func NewNotificationUseCase(gateway application.NotificationGateway, uow application.SagaUnitOfWork) *NotificationUseCase {
+	return &NotificationUseCase{gateway: gateway, uow: uow}
 }
 
 // Handle consome um evento do tópico de notificação, ignorando os que não forem comandos,
@@ -33,7 +33,13 @@ func (uc *NotificationUseCase) Handle(ctx context.Context, event domain.Event) e
 		return fmt.Errorf("%w: comando de notificação inválido para o pedido %s: status esperado %s, recebido %s", application.ErrNonRetryable, event.OrderID, domain.StatusInventoryReserved, event.StatusAtual)
 	}
 
-	seen, err := alreadyProcessed(ctx, uc.eventLog, componentNotification, event)
+	return uc.uow.WithTx(ctx, func(tx application.SagaTx) error {
+		return uc.notify(ctx, tx, event)
+	})
+}
+
+func (uc *NotificationUseCase) notify(ctx context.Context, tx application.SagaTx, event domain.Event) error {
+	seen, err := alreadyProcessed(ctx, tx.EventLog, componentNotification, event)
 	if err != nil {
 		return err
 	}
@@ -41,12 +47,12 @@ func (uc *NotificationUseCase) Handle(ctx context.Context, event domain.Event) e
 		return nil // comando já processado (redelivery)
 	}
 
-	if err := appendLog(ctx, uc.eventLog, componentNotification, event, application.DirectionIn, nil, nil); err != nil {
+	if err := appendLog(ctx, tx.EventLog, componentNotification, event, application.DirectionIn, nil, nil); err != nil {
 		return err
 	}
 
 	requestPayload := map[string]any{"order_id": event.OrderID, "op": "notify"}
-	if err := appendLog(ctx, uc.eventLog, componentNotification, event, application.DirectionGatewayRequest, requestPayload, nil); err != nil {
+	if err := appendLog(ctx, tx.EventLog, componentNotification, event, application.DirectionGatewayRequest, requestPayload, nil); err != nil {
 		return err
 	}
 
@@ -56,7 +62,7 @@ func (uc *NotificationUseCase) Handle(ctx context.Context, event domain.Event) e
 	if err != nil {
 		responsePayload = map[string]any{"error": err.Error()}
 	}
-	if err := appendLog(ctx, uc.eventLog, componentNotification, event, application.DirectionGatewayResponse, nil, responsePayload); err != nil {
+	if err := appendLog(ctx, tx.EventLog, componentNotification, event, application.DirectionGatewayResponse, nil, responsePayload); err != nil {
 		return err
 	}
 
@@ -80,8 +86,8 @@ func (uc *NotificationUseCase) Handle(ctx context.Context, event domain.Event) e
 		result.StatusAtual = domain.StatusFailed
 	}
 
-	if err := appendLog(ctx, uc.eventLog, componentNotification, result, application.DirectionOut, nil, nil); err != nil {
+	if err := appendLog(ctx, tx.EventLog, componentNotification, result, application.DirectionOut, nil, nil); err != nil {
 		return err
 	}
-	return uc.publisher.Publish(ctx, result)
+	return tx.Publisher.Publish(ctx, result)
 }

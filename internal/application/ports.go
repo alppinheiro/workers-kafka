@@ -83,6 +83,22 @@ type EventLogRepository interface {
 	Has(ctx context.Context, eventID string, component string) (bool, error)
 }
 
+// SagaTx agrupa as operações de escrita que devem ser atômicas no processamento de um
+// evento: estado da saga, journal de eventos e outbox compartilham a mesma transação.
+type SagaTx struct {
+	Sagas     SagaRepository
+	EventLog  EventLogRepository
+	Publisher EventPublisher
+}
+
+// SagaUnitOfWork executa um bloco de lógica em uma única transação do banco de escrita.
+// Se fn retornar erro, todas as escritas são desfeitas (rollback); caso contrário, a
+// transação é commitada. Elimina as janelas residuais de consistência entre estado,
+// journal e outbox (Etapa 7.4).
+type SagaUnitOfWork interface {
+	WithTx(ctx context.Context, fn func(tx SagaTx) error) error
+}
+
 // OrderViewRepository persiste o read model de pedidos no banco de leitura.
 type OrderViewRepository interface {
 	// ApplyEvent atualiza o read model a partir de um evento do barramento.

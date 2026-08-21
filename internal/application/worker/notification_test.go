@@ -11,7 +11,7 @@ import (
 
 func TestNotificationUseCase_Handle_IgnoredEventType(t *testing.T) {
 	pub := &mockPublisher{}
-	uc := NewNotificationUseCase(&mockNotificationGateway{}, pub, &fakeEventLog{})
+	uc := NewNotificationUseCase(&mockNotificationGateway{}, uowWith(pub, &fakeEventLog{}))
 
 	err := uc.Handle(context.Background(), resultEvent("order-001", domain.EventNotificationResult, domain.StatusNotified))
 	if err != nil {
@@ -24,7 +24,7 @@ func TestNotificationUseCase_Handle_IgnoredEventType(t *testing.T) {
 
 func TestNotificationUseCase_Handle_InvalidStatus(t *testing.T) {
 	pub := &mockPublisher{}
-	uc := NewNotificationUseCase(&mockNotificationGateway{}, pub, &fakeEventLog{})
+	uc := NewNotificationUseCase(&mockNotificationGateway{}, uowWith(pub, &fakeEventLog{}))
 
 	event := resultEvent("order-001", domain.EventNotificationCommand, domain.StatusPending)
 	err := uc.Handle(context.Background(), event)
@@ -36,7 +36,7 @@ func TestNotificationUseCase_Handle_InvalidStatus(t *testing.T) {
 func TestNotificationUseCase_Handle_Notified(t *testing.T) {
 	pub := &mockPublisher{}
 	gateway := &mockNotificationGateway{sent: true}
-	uc := NewNotificationUseCase(gateway, pub, &fakeEventLog{})
+	uc := NewNotificationUseCase(gateway, uowWith(pub, &fakeEventLog{}))
 
 	event := resultEvent("order-001", domain.EventNotificationCommand, domain.StatusInventoryReserved)
 	err := uc.Handle(context.Background(), event)
@@ -59,7 +59,7 @@ func TestNotificationUseCase_Handle_Notified(t *testing.T) {
 func TestNotificationUseCase_Handle_NotSent(t *testing.T) {
 	pub := &mockPublisher{}
 	gateway := &mockNotificationGateway{sent: false}
-	uc := NewNotificationUseCase(gateway, pub, &fakeEventLog{})
+	uc := NewNotificationUseCase(gateway, uowWith(pub, &fakeEventLog{}))
 
 	event := resultEvent("order-001", domain.EventNotificationCommand, domain.StatusInventoryReserved)
 	err := uc.Handle(context.Background(), event)
@@ -75,7 +75,7 @@ func TestNotificationUseCase_Handle_NotSent(t *testing.T) {
 func TestNotificationUseCase_Handle_GatewayError(t *testing.T) {
 	pub := &mockPublisher{}
 	gateway := &mockNotificationGateway{err: errSimulado}
-	uc := NewNotificationUseCase(gateway, pub, &fakeEventLog{})
+	uc := NewNotificationUseCase(gateway, uowWith(pub, &fakeEventLog{}))
 
 	event := resultEvent("order-001", domain.EventNotificationCommand, domain.StatusInventoryReserved)
 	err := uc.Handle(context.Background(), event)

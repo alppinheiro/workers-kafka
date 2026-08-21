@@ -11,9 +11,9 @@ import (
 	"workers-kafka/internal/infrastructure/external"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
 	"workers-kafka/internal/infrastructure/metrics"
-	"workers-kafka/internal/infrastructure/outbox"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 	"workers-kafka/internal/infrastructure/telemetry"
+	"workers-kafka/internal/infrastructure/uow"
 	"workers-kafka/internal/interfaces"
 )
 
@@ -53,9 +53,7 @@ func main() {
 	}
 	defer pool.Close()
 
-	eventLog := infrapostgres.NewEventLogRepository(pool)
-	publisher := outbox.NewPublisher(infrapostgres.NewOutboxRepository(pool))
-	useCase := worker.NewNotificationUseCase(gateway, publisher, eventLog)
+	useCase := worker.NewNotificationUseCase(gateway, uow.New(pool))
 
 	log.Println("worker de notificação: aguardando comandos")
 	if err := consumer.Consume(ctx, interfaces.WithLogging("worker-notification", useCase.Handle)); err != nil && ctx.Err() == nil {

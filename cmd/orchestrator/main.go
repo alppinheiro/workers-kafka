@@ -10,9 +10,9 @@ import (
 	"workers-kafka/internal/application/orchestrator"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
 	"workers-kafka/internal/infrastructure/metrics"
-	"workers-kafka/internal/infrastructure/outbox"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 	"workers-kafka/internal/infrastructure/telemetry"
+	"workers-kafka/internal/infrastructure/uow"
 	"workers-kafka/internal/interfaces"
 )
 
@@ -57,11 +57,7 @@ func main() {
 	}
 	defer pool.Close()
 
-	sagaRepo := infrapostgres.NewSagaRepository(pool)
-	eventLog := infrapostgres.NewEventLogRepository(pool)
-	publisher := outbox.NewPublisher(infrapostgres.NewOutboxRepository(pool))
-
-	orch := orchestrator.New(publisher, sagaRepo, eventLog, 3)
+	orch := orchestrator.New(uow.New(pool), 3)
 
 	log.Println("orquestrador: aguardando eventos")
 	if err := consumer.Consume(ctx, interfaces.WithLogging("orchestrator", orch.HandleEvent)); err != nil && ctx.Err() == nil {

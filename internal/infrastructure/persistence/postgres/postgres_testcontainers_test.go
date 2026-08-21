@@ -4,15 +4,18 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
+	"workers-kafka/internal/application"
 	"workers-kafka/internal/application/orchestrator"
 	"workers-kafka/internal/domain"
-	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
+	"workers-kafka/internal/infrastructure/uow"
 )
 
 // TestSagaFlowWithPostgresContainer valida o fluxo completo da saga contra um Postgres
@@ -44,10 +47,7 @@ func TestSagaFlowWithPostgresContainer(t *testing.T) {
 
 	applyMigrations(t, pool)
 
-	pub := &capturingPublisher{}
-	orch := orchestrator.New(pub,
-		infrapostgres.NewSagaRepository(pool),
-		infrapostgres.NewEventLogRepository(pool), 3)
+	orch := orchestrator.New(uow.New(pool), 3)
 
 	orderID := "order-tc-001"
 	if err := orch.StartOrder(ctx, flowEvent(orderID, "e-tc-created", domain.EventOrderCreated, domain.StatusPending, "")); err != nil {
@@ -68,6 +68,15 @@ func TestSagaFlowWithPostgresContainer(t *testing.T) {
 	}
 
 	assertSagaFinal(t, pool, orderID, domain.StatusCompleted)
+
+	// A outbox deve acompanhar as transições da saga (nada de outbox órfã nem ausente).
+	var outboxCount int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM outbox WHERE key=$1", orderID).Scan(&outboxCount); err != nil {
+		t.Fatalf("falha ao contar outbox do pedido: %v", err)
+	}
+	if outboxCount == 0 {
+		t.Error("esperado ao menos 1 evento na outbox para o pedido concluído")
+	}
 
 	got := fetchLogSequence(t, pool, orderID)
 	want := []expectedLog{
@@ -107,6 +116,84 @@ func applyMigrations(t *testing.T, pool *pgxpool.Pool) {
 		}
 		if _, err := pool.Exec(context.Background(), string(b)); err != nil {
 			t.Fatalf("falha ao aplicar migration %s: %v", f, err)
+		}
+	}
+}
+
+// TestUnitOfWorkRollbackWithContainer prova a atomicidade da Etapa 7.4 contra um Postgres
+// REAL: as três escritas (estado + journal + outbox) ocorrem na mesma transação e, quando
+// o bloco falha, nenhuma delas é persistida (rollback).
+func TestUnitOfWorkRollbackWithContainer(t *testing.T) {
+	ctx := context.Background()
+
+	pg, err := postgres.Run(ctx, "postgres:16-alpine",
+		postgres.WithDatabase("saga"),
+		postgres.WithUsername("saga"),
+		postgres.WithPassword("saga"),
+		postgres.BasicWaitStrategies(),
+	)
+	if err != nil {
+		t.Fatalf("falha ao subir postgres (testcontainers): %v", err)
+	}
+	defer func() { _ = pg.Terminate(ctx) }()
+
+	url, err := pg.ConnectionString(ctx, "sslmode=disable")
+	if err != nil {
+		t.Fatalf("falha ao obter connection string: %v", err)
+	}
+
+	pool, err := pgxpool.New(ctx, url)
+	if err != nil {
+		t.Fatalf("falha ao conectar no postgres: %v", err)
+	}
+	defer pool.Close()
+
+	applyMigrations(t, pool)
+
+	orderID := "order-tc-rollback"
+	saga := domain.Saga{OrderID: orderID, Current: domain.StatusPaymentPending}
+	entry := application.EventLogEntry{
+		OrderID: orderID, SagaID: orderID, EventID: "e-tc-rollback",
+		EventType: domain.EventPaymentCommand, Component: "orchestrator",
+		Direction: application.DirectionOut, StatusAtual: domain.StatusPaymentPending,
+	}
+	command := domain.Event{
+		EventID:       "e-tc-rollback",
+		OrderID:       orderID,
+		SagaID:        orderID,
+		StatusAtual:   domain.StatusPaymentPending,
+		EventType:     domain.EventPaymentCommand,
+		SchemaVersion: domain.CurrentSchemaVersion,
+		CreatedAt:     time.Now().UTC(),
+	}
+
+	err = uow.New(pool).WithTx(ctx, func(tx application.SagaTx) error {
+		if err := tx.Sagas.Save(ctx, saga); err != nil {
+			return err
+		}
+		if err := tx.EventLog.Append(ctx, entry); err != nil {
+			return err
+		}
+		if err := tx.Publisher.Publish(ctx, command); err != nil {
+			return err
+		}
+		return errors.New("erro simulado: aborta a transação")
+	})
+	if err == nil {
+		t.Fatal("esperado erro do bloco transacional")
+	}
+
+	for _, table := range []struct{ tbl, col, val string }{
+		{"sagas", "order_id", orderID},
+		{"saga_events", "order_id", orderID},
+		{"outbox", "event_id", "e-tc-rollback"},
+	} {
+		var got int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM "+table.tbl+" WHERE "+table.col+" = $1", table.val).Scan(&got); err != nil {
+			t.Fatalf("falha ao contar %s: %v", table.tbl, err)
+		}
+		if got != 0 {
+			t.Errorf("%s: %s=%s: rollback não desfez a escrita (count=%d)", table.tbl, table.col, table.val, got)
 		}
 	}
 }

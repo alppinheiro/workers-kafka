@@ -156,6 +156,23 @@ com tópico recriado e o **watchdog anti-stall reconecta o reader sozinho** em a
 - **Validação:** testes de consistência (nenhum evento sem estado; outbox sempre acompanhada);
   Testcontainers verdes.
 
+**✅ Resultado (21/08/2026):**
+- **Porta `application.SagaUnitOfWork`**: `WithTx(ctx, fn(tx application.SagaTx) error)` — o
+  handler executa todo o processamento do evento em um bloco; commit se `fn` retornar `nil`,
+  rollback total em qualquer erro.
+- **Implementação `internal/infrastructure/uow`**: `PostgresUnitOfWork` abre `pgx.Tx` e expõe
+  repositórios transacionais (`NewSagaRepositoryTx`, `NewEventLogRepositoryTx`,
+  `NewOutboxRepositoryTx`) + o publisher da outbox ligado à transação.
+- **Repositórios com `DBTX`**: contrato mínimo (Exec/Query/QueryRow) compartilhado por
+  `*pgxpool.Pool` e `pgx.Tx` — os mesmos métodos servem fora e dentro de transação.
+- **Orquestrador e workers atômicos**: `StartOrder`/`HandleResult` e os 3 workers passam a
+  gravar estado + journal + outbox na mesma transação por evento (antes eram 3 operações
+  independentes cobertas só por idempotência).
+- **Testes de consistência**: `TestUnitOfWork_AtomicCommit` (sagas + saga_events + outbox
+  persistem juntas) e `TestUnitOfWork_AtomicRollback` (erro no bloco → nada é persistido) com
+  Postgres real (DATABASE_URL) e versão Testcontainers (`TestUnitOfWorkRollbackWithContainer`);
+  fluxo completo do container também valida outbox populada. `make check` verde.
+
 ### Etapa 7.5 — Validação final de produção (DoD)
 
 - Benchmark completo A/B/C com tudo otimizado (registrar no `BENCHMARK.md`).

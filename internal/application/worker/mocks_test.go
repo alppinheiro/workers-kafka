@@ -87,3 +87,20 @@ func (f *fakeEventLog) Has(_ context.Context, eventID string, component string) 
 }
 
 var errSimulado = errors.New("erro simulado do gateway")
+
+// fakeUoW executa o bloco de trabalho imediatamente com os fakes, simulando a transação
+// sem banco real (o rollback é no-op; os testes de erro verificam o comportamento).
+type fakeUoW struct {
+	eventLog application.EventLogRepository
+	pub      application.EventPublisher
+}
+
+// uowWith monta um fakeUoW ligado aos fakes informados, permitindo asserções sobre o
+// journal (fakeEventLog) e os eventos publicados (mockPublisher).
+func uowWith(pub application.EventPublisher, eventLog application.EventLogRepository) application.SagaUnitOfWork {
+	return &fakeUoW{eventLog: eventLog, pub: pub}
+}
+
+func (u *fakeUoW) WithTx(_ context.Context, fn func(application.SagaTx) error) error {
+	return fn(application.SagaTx{EventLog: u.eventLog, Publisher: u.pub})
+}

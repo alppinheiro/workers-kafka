@@ -93,3 +93,16 @@ func (m *mockFailingEventLog) Append(context.Context, application.EventLogEntry)
 func (m *mockFailingEventLog) Has(context.Context, string, string) (bool, error) {
 	return false, errors.New("falha simulada no journal")
 }
+
+// fakeUoW executa o bloco de trabalho imediatamente com os fakes, simulando a transação
+// sem banco real: as escritas vão direto aos repositórios em memória (rollback = simplesmente
+// não aplicar nada, o que os testes de erro verificam).
+type fakeUoW struct {
+	sagas    application.SagaRepository
+	eventLog application.EventLogRepository
+	pub      application.EventPublisher
+}
+
+func (u *fakeUoW) WithTx(_ context.Context, fn func(application.SagaTx) error) error {
+	return fn(application.SagaTx{Sagas: u.sagas, EventLog: u.eventLog, Publisher: u.pub})
+}
