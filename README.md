@@ -49,7 +49,8 @@ Este projeto é útil para quem quer:
 - entender como separar orquestração, domínio, infraestrutura e workers
 - experimentar cenários de falha em pipelines assíncronos
 - praticar debug distribuído com Kafka, logs e múltiplos processos
-- usar um projeto base para evoluir depois com persistência, testes e observabilidade
+- usar um projeto base para evoluir depois com DLQ, observabilidade e concorrência
+- aprender CQRS na prática com projeção de eventos via Kafka
 
 ## Objetivo
 
@@ -151,7 +152,24 @@ flowchart LR
   PAY_COMP --> OP_COMP
   ORQ --> OS[orders.status]
   OS --> AUD[Order Status Consumer]
+
+  ORQ --> PGE[(postgres: escrita)]
+  PAY --> PGE
+  PAY_COMP --> PGE
+  INV --> PGE
+  NOTI --> PGE
+
+  OC --> PROJ[Projector]
+  OP --> PROJ
+  OI --> PROJ
+  ON --> PROJ
+  OS --> PROJ
+  PROJ --> PGR[(postgres-read: leitura)]
 ```
+
+- **Banco de escrita** (`postgres`, :5433): orquestrador e workers persistem o estado da saga (`sagas`) e o journal de todos os eventos com payloads de request/response dos gateways (`saga_events`).
+- **Banco de leitura** (`postgres-read`, :5434): o serviço **`projector`** consome os cinco tópicos do Kafka e monta o read model (`order_views`) + dedup (`processed_events`), pronto para uma futura API de consulta.
+- **Garantia de dados**: at-least-once + dedup por `event_id` + reentrega do Kafka; o orquestrador pode ser reiniciado no meio de uma saga e ela continua de onde parou.
 
 ## Fluxo Ponta a Ponta
 
@@ -184,6 +202,8 @@ sequenceDiagram
     O->>K: ORDER_COMPLETED / COMPLETED
     K->>S: ORDER_COMPLETED
 ```
+
+> **Persistência:** cada evento desse fluxo é gravado no journal (`saga_events`) do banco de escrita e projetado no read model (`order_views`) do banco de leitura pelo serviço `projector`.
 
 ### Fluxo com falha no estoque (compensação)
 
@@ -283,22 +303,31 @@ Todos os eventos usam `order_id` como chave de particionamento para preservar a 
 ```text
 cmd/
   create-order/           publica o evento inicial do pedido
-  orchestrator/           coordena a saga
+  orchestrator/           coordena a saga (estado persistido em PostgreSQL)
+  projector/              projeta os eventos do Kafka no read model (banco de leitura)
   order-status/           consome eventos finais para auditoria
   worker-inventory/       processa estoque
   worker-notification/    processa notificação
-  worker-payment/         processa pagamento
+  worker-payment/         processa pagamento (e compensação/estorno)
 
 internal/
-  application/            casos de uso e orquestração
-  domain/                 entidades, eventos e status
+  application/
+    orchestrator/         casos de uso e orquestração (estado + journal)
+    worker/               workers por etapa (logam request/response dos gateways)
+    projector/            projeção dos eventos no read model
+  domain/                 entidades, eventos, saga e status
   infrastructure/
     external/             simuladores das APIs externas
     kafka/                producer, consumer, tópicos e configuração
+    persistence/
+      postgres/           banco de escrita: SagaRepository, EventLogRepository
+      postgres_read/      banco de leitura: OrderViewRepository (read model)
   interfaces/             adapters e logging
 
+migrations/               SQL do banco de escrita (golang-migrate)
+migrations-read/          SQL do banco de leitura (golang-migrate)
 .vscode/                  debug ponta a ponta no VS Code
-docker-compose.yml        stack local com Kafka
+docker-compose.yml        stack local com Kafka + Postgres (escrita/leitura)
 Dockerfile                build parametrizado dos binários Go
 Makefile                  atalhos de execução e validação
 ```
@@ -308,6 +337,9 @@ Makefile                  atalhos de execução e validação
 - Go 1.26.6
 - Kafka
 - `github.com/segmentio/kafka-go`
+- PostgreSQL 16 (escrita e leitura)
+- `github.com/jackc/pgx/v5` (driver PostgreSQL)
+- `golang-migrate/migrate` (migrations via Docker)
 - Docker
 - Docker Compose
 - VS Code Debug
@@ -378,17 +410,18 @@ O workspace já contém configuração para depurar a saga inteira localmente.
 - `Debug Worker Payment`
 - `Debug Worker Inventory`
 - `Debug Worker Notification`
+- `Debug Projector`
 - `Debug Order Status`
 - `Create Order Event`
 
 ### Como usar
 
 1. Inicie `Debug Saga End-to-End`.
-2. O VS Code sobe `kafka` e `kafka-init` antes de iniciar os processos Go.
+2. O VS Code sobe `kafka`, `kafka-init`, `postgres`, `migrations`, `postgres-read` e `migrations-read` antes de iniciar os processos Go.
 3. Rode `Create Order Event` e informe um `order_id`.
 4. Acompanhe breakpoints e logs correlacionados nos processos locais.
 
-Nesse modo, o Kafka roda em container e os processos Go rodam localmente com `KAFKA_BROKERS=localhost:9094`.
+Nesse modo, o Kafka e o Postgres rodam em containers e os processos Go rodam localmente com `KAFKA_BROKERS=localhost:9094` e `DATABASE_URL` apontando para `localhost:5433` (escrita) ou `localhost:5434` (leitura, no `Debug Projector`).
 
 ## Logs e Correlação
 
