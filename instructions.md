@@ -368,6 +368,7 @@ Este fluxo já está consolidado no topo do documento e segue a sequência `PEND
 - Fase 5 (escalabilidade de produção) concluída conforme `PHASE_5_PLAN.md` e `BENCHMARK.md`: 4 partições por tópico, `SAGA_WORKERS` (Readers concorrentes no mesmo consumer group), escala horizontal via `--scale` (consumer groups), outbox-relay com `FOR UPDATE SKIP LOCKED` (claims) e autoscaler por lag (análogo local ao KEDA/HPA). Benchmark: 3.000 pedidos/60 s com 1 réplica deixam 2.012 na fila; com 3 réplicas + 2 relays, 164 (~12×).
 - CI/CD (planejado): GitHub Actions com `make check` + testes de integração (services postgres/kafka) + push de imagem para ECR; deploy futuro em EKS via Helm (publicação AWS: EKS/ECS, MSK, RDS).
 - Fase 6 (métricas) concluída conforme `PHASE_6_PLAN.md`: métricas Prometheus expostas por serviço (`/metrics` nas portas 9101–9107), `metrics-exporter` (gauges do Postgres: sagas por status, completadas/falhadas), Prometheus + Grafana no docker-compose com dashboard provisionado "Saga - Visão Geral" (8 painéis).
+- **Testcontainers** (pendência da Fase 1 fechada): testes de integração com Kafka e Postgres reais em containers, protegidos pela build tag `integration` (`make integration`). Cobre round-trip Producer→Consumer (Kafka real) e o fluxo completo da saga contra Postgres real (journal até COMPLETED). Requer Docker; no macOS/Colima o `make integration` aponta `DOCKER_HOST` para o socket do Colima.
 
 ## Observação
 

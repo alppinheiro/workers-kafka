@@ -16,8 +16,6 @@ Projeto de estudo em Go para simular o ciclo de vida de um pedido usando **Saga 
     multi-instância, autoscaler por lag (análogo ao KEDA/HPA) (Fase 5)
 - **Fora de Escopo Nesta Fase:**
   - API REST de consulta de pedido
-  - Métricas Prometheus/Grafana (Fase 6 proposta)
-  - Testes de integração com testcontainers (pendência da Fase 1)
   - Escala horizontal real em Kubernetes (KEDA/HPA) — cloud AWS planejada
   - Transação atômica única (estado + journal + outbox)
 

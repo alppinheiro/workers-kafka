@@ -14,10 +14,10 @@ A evolução foi dividida em 5 fases sequenciais. A ordem é crítica: não otim
 - [ ] **Testes Unitários:**
     - Validar a máquina de estados do \`orchestrator\`.
     - Testar a lógica de decisão de retry vs falha definitiva.
-- [ ] **Infraestrutura de Teste:**
-    - Configurar \`testcontainers-go\` para subir Kafka real durante a execução dos testes.
+- [x] **Infraestrutura de Teste:**
+    - Configurar `testcontainers-go` para subir Kafka real durante a execução dos testes (Kafka + Postgres reais — `make integration`, build tag `integration`).
 - [ ] **Testes de Integração:**
-    - Fluxo Feliz: \`PENDING -> COMPLETED\`.
+    - Fluxo Feliz: `PENDING -> COMPLETED` (coberto nos containers — `TestSagaFlowWithPostgresContainer` e `TestKafkaProducerConsumerRoundTrip`).
     - Fluxo de Compensação: \`PAYMENT_APPROVED -> INVENTORY_FAIL -> PAYMENT_REFUNDED\`.
     - Fluxo de Retry: Validar que o sistema tenta X vezes antes de falhar.
 
@@ -86,6 +86,23 @@ A evolução foi dividida em 5 fases sequenciais. A ordem é crítica: não otim
 - [x] **Extras de produção:**
     - Outbox-relay com `FOR UPDATE SKIP LOCKED` (claims) para escala horizontal.
     - Autoscaler por lag (análogo local ao KEDA/HPA).
+
+## 📊 Fase 6: Observabilidade de Métricas (Prometheus + Grafana)
+**Objetivo:** Completar a observabilidade com métricas de throughput, latência, backlog e outbox.
+
+✅ **Concluída** — ver `PHASE_6_PLAN.md`.
+
+- [x] **Métricas Prometheus por serviço** (`/metrics` nas portas 9101–9107): eventos recebidos/processados/falhados/publicados, latência (histograma), DLQ.
+- [x] **`metrics-exporter`**: gauges do Postgres (sagas por status, COMPLETED, FAILED) a cada 10s.
+- [x] **Prometheus + Grafana no docker-compose** com dashboard provisionado "Saga - Visão Geral" (8 painéis).
+
+## 🧪 Integração automatizada (Testcontainers)
+**Objetivo:** Fechar a pendência da Fase 1 — testes com Kafka e Postgres reais em containers.
+
+✅ **Concluída** — `make integration` (build tag `integration`).
+
+- [x] **Round-trip Kafka**: `Producer` → `Consumer` com Kafka real em container.
+- [x] **Fluxo completo da saga**: orquestrador + repositórios reais contra Postgres real (journal `saga_events` até `COMPLETED`).
 
 ---
 

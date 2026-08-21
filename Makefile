@@ -63,5 +63,12 @@ inspect:
 autoscale:
 	KAFKA_BROKERS=localhost:9094 go run ./cmd/autoscaler
 
+# Testes de integração com Testcontainers (Kafka + Postgres reais em containers).
+# Requer Docker em execução (no macOS/Colima aponta o socket do host para a VM).
+integration:
+	DOCKER_HOST=$${DOCKER_HOST:-unix://$$HOME/.colima/default/docker.sock} \
+	TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=$${TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE:-/var/run/docker.sock} \
+	go test -tags integration -v ./internal/infrastructure/kafka/... ./internal/infrastructure/persistence/postgres/...
+
 rebuild:
 	$(COMPOSE) build orchestrator worker-payment worker-inventory worker-notification order-status projector outbox-relay metrics-exporter create-order

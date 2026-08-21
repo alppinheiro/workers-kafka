@@ -135,6 +135,24 @@ make logs
 make check
 ```
 
+### Testes de integração (Testcontainers)
+
+Testes com **Kafka e Postgres reais em containers** (independentes do `docker-compose`),
+protegidos pela build tag `integration`:
+
+```bash
+make integration
+```
+
+Cobertura:
+- **Round-trip Kafka**: `Producer` publica e `Consumer` recebe o evento (Kafka real em container).
+- **Fluxo completo da saga**: orquestrador + repositórios reais contra Postgres real em container
+  (journal `saga_events` com a sequência IN/OUT completa até `COMPLETED`).
+
+No macOS com Colima, o `make integration` já aponta o socket do Docker para a VM do Colima.
+No Linux (CI/GitHub Actions) as variáveis `DOCKER_HOST`/`TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE`
+definidas localmente são respeitadas.
+
 ## Visão Geral da Arquitetura
 
 ```mermaid
@@ -674,7 +692,6 @@ Métricas principais:
   (expostas pelo `metrics-exporter`, que lê o Postgres a cada 10s)
 
 ## Teste de Carga e Como Escalar
-
 O projeto inclui um **load-generator** que publica eventos `ORDER_CREATED` em lote e mede a vazão de ingestão:
 
 ```bash
@@ -789,22 +806,17 @@ Incluído nesta fase:
 
 - transação atômica única (estado + journal + outbox) — refinamento futuro documentado
 - API REST de consulta de pedido (o read model `order_views` já está pronto para isso)
-- métricas Prometheus + dashboards Grafana (traces já existem via Jaeger)
 - tratamento de produção com políticas avançadas de retry
 
 Fora de escopo nesta fase:
 
 - transação atômica única (estado + journal + outbox)
 - API REST
-- métricas Prometheus/Grafana
-- integração automatizada (testcontainers)
 - escala horizontal real em Kubernetes (KEDA/HPA)
 
 ## Próximos Passos Naturais
 
-- Fase 6: métricas Prometheus + dashboards Grafana
 - CI/CD com GitHub Actions (CI funcional: `make check` + testes de integração + imagem Docker)
 - cloud readiness AWS (Helm/Terraform, EKS/ECS + MSK + RDS; KEDA no lugar do autoscaler local)
-- Testcontainers (integração automatizada com Kafka/Postgres reais)
 - API REST de consulta de pedido lendo o read model `order_views`
 - transação atômica única (estado + journal + outbox) para eliminar janelas residuais
