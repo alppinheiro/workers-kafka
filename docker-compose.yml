@@ -59,6 +59,16 @@ services:
       - up
     restart: "no"
 
+  jaeger:
+    image: jaegertracing/jaeger:2.9.0
+    container_name: workers-kafka-jaeger
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+
   kafka:
     image: apache/kafka:3.9.0
     container_name: workers-kafka-broker
@@ -116,6 +126,7 @@ services:
         TARGET: cmd/orchestrator
     environment:
       KAFKA_BROKERS: kafka:9092
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
       DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
     depends_on:
       kafka-init:
@@ -130,6 +141,7 @@ services:
         TARGET: cmd/worker-payment
     environment:
       KAFKA_BROKERS: kafka:9092
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
       DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
     depends_on:
       kafka-init:
@@ -144,6 +156,7 @@ services:
         TARGET: cmd/worker-inventory
     environment:
       KAFKA_BROKERS: kafka:9092
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
       DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
     depends_on:
       kafka-init:
@@ -158,6 +171,7 @@ services:
         TARGET: cmd/worker-notification
     environment:
       KAFKA_BROKERS: kafka:9092
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
       DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
     depends_on:
       kafka-init:
@@ -172,6 +186,7 @@ services:
         TARGET: cmd/projector
     environment:
       KAFKA_BROKERS: kafka:9092
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
       DATABASE_URL: postgres://saga:saga@postgres-read:5432/saga_read?sslmode=disable
     depends_on:
       kafka-init:
@@ -186,6 +201,7 @@ services:
         TARGET: cmd/outbox-relay
     environment:
       KAFKA_BROKERS: kafka:9092
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
       DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
     depends_on:
       kafka-init:
@@ -200,6 +216,7 @@ services:
         TARGET: cmd/order-status
     environment:
       KAFKA_BROKERS: kafka:9092
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
     depends_on:
       kafka-init:
         condition: service_completed_successfully
@@ -211,6 +228,7 @@ services:
         TARGET: cmd/create-order
     environment:
       KAFKA_BROKERS: kafka:9092
+      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
     depends_on:
       kafka-init:
         condition: service_completed_successfully

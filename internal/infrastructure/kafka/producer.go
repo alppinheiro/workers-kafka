@@ -10,6 +10,8 @@ import (
 	"time"
 
 	kafkago "github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 
 	"workers-kafka/internal/domain"
 )
@@ -65,9 +67,10 @@ func (p *Producer) Publish(ctx context.Context, event domain.Event) error {
 	}
 
 	if err := p.writer.WriteMessages(ctx, kafkago.Message{
-		Topic: topic,
-		Key:   []byte(event.OrderID),
-		Value: payload,
+		Topic:   topic,
+		Key:     []byte(event.OrderID),
+		Value:   payload,
+		Headers: injectTraceHeaders(ctx),
 	}); err != nil {
 		log.Printf("component=producer phase=failed topic=%s event_id=%s order_id=%s saga_id=%s type=%s duration=%s error=%v",
 			topic,
@@ -105,13 +108,42 @@ func (p *Producer) Publish(ctx context.Context, event domain.Event) error {
 // outbox-relay, que não precisa desserializar o evento).
 func (p *Producer) PublishRaw(ctx context.Context, topic string, key string, payload []byte) error {
 	if err := p.writer.WriteMessages(ctx, kafkago.Message{
-		Topic: topic,
-		Key:   []byte(key),
-		Value: payload,
+		Topic:   topic,
+		Key:     []byte(key),
+		Value:   payload,
+		Headers: injectTraceHeaders(ctx),
 	}); err != nil {
 		return err
 	}
 	return nil
+}
+
+// PublishBatch publica múltiplas mensagens em uma única chamada ao Kafka, evitando o
+// custo de um round-trip por mensagem (usado pelo outbox-relay para alta vazão).
+func (p *Producer) PublishBatch(ctx context.Context, msgs []kafkago.Message) error {
+	if len(msgs) == 0 {
+		return nil
+	}
+	return p.writer.WriteMessages(ctx, msgs...)
+}
+
+// TraceHeadersFrom serializa o contexto de trace corrente (W3C traceparent) nos headers
+// do Kafka, para propagação distribuída (usado pelo outbox-relay ao publicar em lote).
+func TraceHeadersFrom(ctx context.Context) []kafkago.Header {
+	return injectTraceHeaders(ctx)
+}
+
+// injectTraceHeaders serializa o contexto de trace corrente (W3C traceparent) nos
+// headers da mensagem para propagação distribuída entre os componentes.
+func injectTraceHeaders(ctx context.Context) []kafkago.Header {
+	carrier := make(propagation.MapCarrier)
+	otel.GetTextMapPropagator().Inject(ctx, carrier)
+
+	headers := make([]kafkago.Header, 0, len(carrier))
+	for k, v := range carrier {
+		headers = append(headers, kafkago.Header{Key: k, Value: []byte(v)})
+	}
+	return headers
 }
 
 // Close libera os recursos do writer subjacente.

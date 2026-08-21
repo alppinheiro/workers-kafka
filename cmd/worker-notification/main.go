@@ -12,6 +12,7 @@ import (
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
 	"workers-kafka/internal/infrastructure/outbox"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
+	"workers-kafka/internal/infrastructure/telemetry"
 	"workers-kafka/internal/interfaces"
 )
 
@@ -23,10 +24,11 @@ func main() {
 	defer func() { _ = dlq.Close() }()
 
 	consumer := infrakafka.NewConsumer(infrakafka.ConsumerConfig{
-		Brokers:   brokers,
-		GroupID:   "worker-notification",
-		Topic:     infrakafka.TopicOrderNotification,
-		DLQWriter: dlq,
+		Brokers:     brokers,
+		GroupID:     "worker-notification",
+		ServiceName: "worker-notification",
+		Topic:       infrakafka.TopicOrderNotification,
+		DLQWriter:   dlq,
 	})
 	defer func() { _ = consumer.Close() }()
 
@@ -34,6 +36,12 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	shutdown, err := telemetry.Init("worker-notification")
+	if err != nil {
+		log.Fatalf("worker de notificação: falha ao inicializar telemetria: %v", err)
+	}
+	defer func() { _ = shutdown(ctx) }()
 
 	pool, err := infrapostgres.Connect(ctx, infrapostgres.DatabaseURLFromEnv())
 	if err != nil {

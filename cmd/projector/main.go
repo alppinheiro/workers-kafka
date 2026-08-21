@@ -11,6 +11,7 @@ import (
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 	infrapostgresread "workers-kafka/internal/infrastructure/persistence/postgres_read"
+	"workers-kafka/internal/infrastructure/telemetry"
 	"workers-kafka/internal/interfaces"
 )
 
@@ -23,8 +24,9 @@ func main() {
 	defer func() { _ = dlq.Close() }()
 
 	consumer := infrakafka.NewConsumer(infrakafka.ConsumerConfig{
-		Brokers: brokers,
-		GroupID: "projector",
+		Brokers:     brokers,
+		GroupID:     "projector",
+		ServiceName: "projector",
 		Topics: []string{
 			infrakafka.TopicOrderCreated,
 			infrakafka.TopicOrderPayment,
@@ -38,6 +40,12 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	shutdown, err := telemetry.Init("projector")
+	if err != nil {
+		log.Fatalf("projector: falha ao inicializar telemetria: %v", err)
+	}
+	defer func() { _ = shutdown(ctx) }()
 
 	pool, err := infrapostgres.Connect(ctx, infrapostgresread.DatabaseURLFromEnv())
 	if err != nil {

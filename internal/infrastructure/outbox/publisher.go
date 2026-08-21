@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+
 	"workers-kafka/internal/domain"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
@@ -21,7 +24,8 @@ func NewPublisher(outbox *infrapostgres.OutboxRepository) *Publisher {
 	return &Publisher{outbox: outbox}
 }
 
-// Publish resolve o tópico do evento e o registra na outbox.
+// Publish resolve o tópico do evento e o registra na outbox, preservando o trace
+// corrente (W3C traceparent) para que o outbox-relay continue a cadeia distribuída.
 func (p *Publisher) Publish(ctx context.Context, event domain.Event) error {
 	topic, ok := infrakafka.TopicForEventType(event.EventType)
 	if !ok {
@@ -34,9 +38,18 @@ func (p *Publisher) Publish(ctx context.Context, event domain.Event) error {
 	}
 
 	return p.outbox.Append(ctx, infrapostgres.OutboxEntry{
-		EventID: event.EventID,
-		Topic:   topic,
-		Key:     event.OrderID,
-		Payload: payload,
+		EventID:     event.EventID,
+		Topic:       topic,
+		Key:         event.OrderID,
+		Payload:     payload,
+		Traceparent: extractTraceparent(ctx),
 	})
+}
+
+// extractTraceparent serializa o trace corrente (W3C traceparent) para ser propagado
+// pelo outbox-relay no momento da publicação no Kafka.
+func extractTraceparent(ctx context.Context) string {
+	carrier := make(propagation.MapCarrier)
+	otel.GetTextMapPropagator().Inject(ctx, carrier)
+	return carrier["traceparent"]
 }

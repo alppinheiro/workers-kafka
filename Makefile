@@ -1,6 +1,6 @@
 COMPOSE ?= docker-compose
 ORDER_ID ?= order-001
-SERVICES = kafka kafka-init postgres migrations postgres-read migrations-read orchestrator worker-payment worker-inventory worker-notification order-status projector outbox-relay
+SERVICES = kafka kafka-init postgres migrations postgres-read migrations-read jaeger orchestrator worker-payment worker-inventory worker-notification order-status projector outbox-relay
 
 .PHONY: help fmt build vet test lint check up down logs ps create-order inspect rebuild
 

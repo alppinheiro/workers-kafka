@@ -9,6 +9,10 @@ import (
 	"time"
 
 	kafkago "github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 
 	"workers-kafka/internal/application"
 	"workers-kafka/internal/domain"
@@ -20,6 +24,8 @@ const consumerRetryDelay = 2 * time.Second
 type ConsumerConfig struct {
 	Brokers []string
 	GroupID string
+	// ServiceName identifica o serviço nos spans (OpenTelemetry).
+	ServiceName string
 	// Topic é usado quando o consumer acompanha um único tópico.
 	Topic string
 	// Topics permite acompanhar múltiplos tópicos com um único reader, evitando goroutines adicionais.
@@ -31,12 +37,17 @@ type ConsumerConfig struct {
 
 // Consumer lê eventos de Kafka e os repassa, já desserializados, para um application.EventHandler.
 type Consumer struct {
-	reader *kafkago.Reader
-	dlq    *kafkago.Writer
+	reader      *kafkago.Reader
+	dlq         *kafkago.Writer
+	serviceName string
 }
 
 // NewConsumer cria um consumer a partir da configuração informada.
 func NewConsumer(cfg ConsumerConfig) *Consumer {
+	serviceName := cfg.ServiceName
+	if serviceName == "" {
+		serviceName = "consumer"
+	}
 	return &Consumer{
 		reader: kafkago.NewReader(kafkago.ReaderConfig{
 			Brokers:     cfg.Brokers,
@@ -44,7 +55,8 @@ func NewConsumer(cfg ConsumerConfig) *Consumer {
 			Topic:       cfg.Topic,
 			GroupTopics: cfg.Topics,
 		}),
-		dlq: cfg.DLQWriter,
+		dlq:         cfg.DLQWriter,
+		serviceName: serviceName,
 	}
 }
 
@@ -77,8 +89,19 @@ func (c *Consumer) Consume(ctx context.Context, handler application.EventHandler
 			return fmt.Errorf("erro ao desserializar evento: %w", err)
 		}
 
-		if err := handler(ctx, event); err != nil {
-			moved, moveErr := c.moveToDLQ(ctx, msg, fmt.Errorf("erro ao processar evento %s: %w", event.EventID, err))
+		// Propaga o trace (W3C traceparent) dos headers e abre um span por evento.
+		handlerCtx := extractTraceContext(ctx, msg.Headers)
+		handlerCtx, span := c.tracer().Start(handlerCtx, "consume "+string(event.EventType),
+			trace.WithAttributes(
+				attribute.String("order_id", event.OrderID),
+				attribute.String("event_id", event.EventID),
+			))
+
+		err = handler(handlerCtx, event)
+		span.End()
+
+		if err != nil {
+			moved, moveErr := c.moveToDLQ(handlerCtx, msg, fmt.Errorf("erro ao processar evento %s: %w", event.EventID, err))
 			if moveErr != nil {
 				return moveErr
 			}
@@ -113,6 +136,20 @@ func (c *Consumer) moveToDLQ(ctx context.Context, msg kafkago.Message, err error
 		return false, fmt.Errorf("erro ao confirmar mensagem movida para a DLQ: %w", commitErr)
 	}
 	return true, nil
+}
+
+// extractTraceContext recupera o contexto de trace (W3C traceparent) dos headers do Kafka.
+func extractTraceContext(ctx context.Context, headers []kafkago.Header) context.Context {
+	carrier := make(propagation.MapCarrier)
+	for _, h := range headers {
+		carrier[h.Key] = string(h.Value)
+	}
+	return otel.GetTextMapPropagator().Extract(ctx, carrier)
+}
+
+// tracer retorna o tracer nomeado pelo serviço (OpenTelemetry).
+func (c *Consumer) tracer() trace.Tracer {
+	return otel.Tracer(c.serviceName)
 }
 
 // Close libera os recursos do reader subjacente.

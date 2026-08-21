@@ -11,6 +11,7 @@ import (
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
 	"workers-kafka/internal/infrastructure/outbox"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
+	"workers-kafka/internal/infrastructure/telemetry"
 	"workers-kafka/internal/interfaces"
 )
 
@@ -24,8 +25,9 @@ func main() {
 	defer func() { _ = dlq.Close() }()
 
 	consumer := infrakafka.NewConsumer(infrakafka.ConsumerConfig{
-		Brokers: brokers,
-		GroupID: "orchestrator",
+		Brokers:     brokers,
+		GroupID:     "orchestrator",
+		ServiceName: "orchestrator",
 		Topics: []string{
 			infrakafka.TopicOrderCreated,
 			infrakafka.TopicOrderPayment,
@@ -38,6 +40,12 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	shutdown, err := telemetry.Init("orchestrator")
+	if err != nil {
+		log.Fatalf("orquestrador: falha ao inicializar telemetria: %v", err)
+	}
+	defer func() { _ = shutdown(ctx) }()
 
 	pool, err := infrapostgres.Connect(ctx, infrapostgres.DatabaseURLFromEnv())
 	if err != nil {

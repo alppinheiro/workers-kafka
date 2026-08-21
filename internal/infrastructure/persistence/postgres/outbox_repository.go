@@ -9,11 +9,12 @@ import (
 
 // OutboxEntry representa um evento registrado na outbox aguardando publicação no Kafka.
 type OutboxEntry struct {
-	ID      int64
-	EventID string
-	Topic   string
-	Key     string
-	Payload []byte
+	ID          int64
+	EventID     string
+	Topic       string
+	Key         string
+	Payload     []byte
+	Traceparent string
 }
 
 // OutboxRepository persiste eventos a publicar no Kafka (Outbox Pattern).
@@ -29,11 +30,11 @@ func NewOutboxRepository(pool *pgxpool.Pool) *OutboxRepository {
 // Append insere um evento na outbox. A gravação é idempotente por event_id (UNIQUE).
 func (r *OutboxRepository) Append(ctx context.Context, entry OutboxEntry) error {
 	const query = `
-INSERT INTO outbox (event_id, topic, key, payload)
-VALUES ($1, $2, $3, $4)
+INSERT INTO outbox (event_id, topic, key, payload, traceparent)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (event_id) DO NOTHING`
 
-	_, err := r.pool.Exec(ctx, query, entry.EventID, entry.Topic, entry.Key, entry.Payload)
+	_, err := r.pool.Exec(ctx, query, entry.EventID, entry.Topic, entry.Key, entry.Payload, entry.Traceparent)
 	if err != nil {
 		return fmt.Errorf("erro ao gravar evento %s na outbox: %w", entry.EventID, err)
 	}
@@ -43,7 +44,7 @@ ON CONFLICT (event_id) DO NOTHING`
 // FetchPending retorna até limit eventos ainda não publicados, em ordem de criação.
 func (r *OutboxRepository) FetchPending(ctx context.Context, limit int) ([]OutboxEntry, error) {
 	const query = `
-SELECT id, event_id, topic, key, payload FROM outbox
+SELECT id, event_id, topic, key, payload, COALESCE(traceparent, '') FROM outbox
 WHERE published_at IS NULL
 ORDER BY id
 LIMIT $1`
@@ -57,7 +58,7 @@ LIMIT $1`
 	var entries []OutboxEntry
 	for rows.Next() {
 		var e OutboxEntry
-		if err := rows.Scan(&e.ID, &e.EventID, &e.Topic, &e.Key, &e.Payload); err != nil {
+		if err := rows.Scan(&e.ID, &e.EventID, &e.Topic, &e.Key, &e.Payload, &e.Traceparent); err != nil {
 			return nil, fmt.Errorf("erro ao ler outbox pendente: %w", err)
 		}
 		entries = append(entries, e)

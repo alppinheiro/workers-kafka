@@ -616,6 +616,81 @@ make create-order ORDER_ID=order-notification-fail-001
 make create-order ORDER_ID=order-payment-retry-001
 ```
 
+## Observabilidade (OpenTelemetry + Jaeger)
+
+O projeto é instrumentado com **OpenTelemetry**: cada evento consumido gera um span (`consume <EVENT_TYPE>`) com atributos `order_id` e `event_id`, e o `trace_id` é propagado entre os componentes via header W3C `traceparent` nas mensagens do Kafka (orquestrador → workers → projector formam um único trace por pedido).
+
+### Como utilizar
+
+1. A stack sobe o Jaeger junto com `make up` (portas `16686` UI e `4318` OTLP).
+2. Dispare um pedido:
+
+   ```bash
+   make create-order ORDER_ID=order-trace-001
+   ```
+
+3. Abra **http://localhost:16686**:
+   - Em *Service* selecione `orchestrator` (ou `worker-payment`, etc.).
+   - Busque por *Tags*: `order_id="order-trace-001"` ou apenas navegue pelos traces.
+   - O grafo mostra a cadeia completa: `create-order → orchestrator → worker-payment → ... → projector`.
+
+4. Consulta via API:
+
+   ```bash
+   # Listar serviços
+   curl -s http://localhost:16686/api/services
+
+   # Traces do orquestrador (limitado)
+   curl -s "http://localhost:16686/api/traces?service=orchestrator&limit=5&lookback=1h"
+   ```
+
+### Configuração
+
+- Endpoint OTLP via env `OTEL_EXPORTER_OTLP_ENDPOINT` (no docker-compose é `jaeger:4318`; local, `localhost:4318`).
+- Se o Jaeger estiver desligado, os serviços continuam funcionando normalmente (os spans são descartados).
+
+## Teste de Carga e Como Escalar
+
+O projeto inclui um **load-generator** que publica eventos `ORDER_CREATED` em lote e mede a vazão de ingestão:
+
+```bash
+# Publica 2000 pedidos (em lotes de 500)
+KAFKA_BROKERS=localhost:9094 go run ./cmd/load-generator -count 2000 -batch 500 -prefix load
+```
+
+### Resultados observados (ambiente local, arquitetura atual)
+
+| Métrica | Valor |
+|---|---|
+| **Ingestão** (lote via Kafka) | ~47.000 eventos/s |
+| **Processamento** (consumers single-threaded) | dezenas de eventos/s por consumer |
+| Backlog inicial em `orders.created` com 2000 pedidos | lag de ~1.278 → zerado |
+| Gargalo principal identificado | `outbox-relay` publicava 1 mensagem/round-trip (~1 evento/s) |
+
+### O que foi corrigido
+
+- **`outbox-relay` passou a publicar em lote** (`PublishBatch`): o throughput do relay deixou de ser o gargalo (foi de ~1 para centenas de eventos/s).
+
+### Como escalar (próximos passos — Fase 5)
+
+O gargalo restante são os **consumers single-threaded** (orquestrador e workers processam 1 evento por vez, com várias escritas no banco por evento). Para suportar 2.000 pedidos/s de forma sustentada:
+
+1. **Processamento concorrente** com goroutines/worker pools nos consumers (partição por `order_id` para preservar a ordem da saga).
+2. **Mais partições** nos tópicos (hoje 1 partição por tópico) para paralelizar consumer groups.
+3. **Escala horizontal** dos workers (consumer groups) e do `outbox-relay`.
+4. Reduzir escritas por evento (ex.: transação atômica estado + journal + outbox já planejada).
+
+Para monitorar o backlog durante a carga:
+
+```bash
+docker-compose exec kafka /bin/sh -c \
+  '/opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group orchestrator'
+
+# Estado das sagas em lote
+docker-compose exec postgres psql -U saga -d saga -c \
+  "SELECT current_status, count(*) FROM sagas WHERE order_id LIKE 'load%' GROUP BY 1 ORDER BY 2 DESC;"
+```
+
 ## Contrato da Mensagem
 
 Cada evento carrega, no mínimo:

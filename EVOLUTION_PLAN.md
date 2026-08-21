@@ -59,13 +59,16 @@ A evolução foi dividida em 5 fases sequenciais. A ordem é crítica: não otim
 ## 👁️ Fase 4: Os Olhos do Sistema (Observabilidade Distribuída)
 **Objetivo:** Rastrear pedidos em tempo real através de múltiplos workers.
 
-- [ ] **Instrumentação OpenTelemetry:**
-    - Adicionar SDK do OTel ao orquestrador e a todos os workers.
-- [ ] **Context Propagation:**
-    - Implementar a passagem de \`trace_id\` via Kafka Headers.
-- [ ] **Visualização:**
-    - Adicionar container \`Jaeger\` ao \`docker-compose.yml\`.
-    - Validar a visualização do grafo de chamadas de um único \`order_id\`.
+✅ **Concluída** — ver `PHASE_4_PLAN.md` para o plano e como utilizar.
+
+- [x] **Instrumentação OpenTelemetry:**
+    - Adicionar SDK do OTel ao orquestrador, workers, projector, outbox-relay e create-order.
+- [x] **Context Propagation:**
+    - Implementar a passagem de `trace_id` via Kafka Headers (W3C `traceparent`).
+    - Propagação preservada através da outbox (coluna `traceparent` + reconstrução no relay).
+- [x] **Visualização:**
+    - Adicionar container `Jaeger` ao `docker-compose.yml`.
+    - Validar a visualização do grafo de chamadas de um único `order_id` (cadeia única).
 
 ## 🚀 Fase 5: O Motor de Alta Performance (Concorrência e Escala)
 **Objetivo:** Maximizar o uso de CPU e aumentar a vazão de pedidos.
