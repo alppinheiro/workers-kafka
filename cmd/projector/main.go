@@ -19,6 +19,9 @@ import (
 func main() {
 	brokers := infrakafka.BrokersFromEnv()
 
+	dlq := infrakafka.NewDLQWriter(brokers)
+	defer func() { _ = dlq.Close() }()
+
 	consumer := infrakafka.NewConsumer(infrakafka.ConsumerConfig{
 		Brokers: brokers,
 		GroupID: "projector",
@@ -29,6 +32,7 @@ func main() {
 			infrakafka.TopicOrderNotification,
 			infrakafka.TopicOrderStatus,
 		},
+		DLQWriter: dlq,
 	})
 	defer func() { _ = consumer.Close() }()
 

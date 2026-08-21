@@ -9,6 +9,7 @@ import (
 
 	"workers-kafka/internal/application/orchestrator"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
+	"workers-kafka/internal/infrastructure/outbox"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 	"workers-kafka/internal/interfaces"
 )
@@ -19,8 +20,8 @@ import (
 func main() {
 	brokers := infrakafka.BrokersFromEnv()
 
-	producer := infrakafka.NewProducer(brokers)
-	defer func() { _ = producer.Close() }()
+	dlq := infrakafka.NewDLQWriter(brokers)
+	defer func() { _ = dlq.Close() }()
 
 	consumer := infrakafka.NewConsumer(infrakafka.ConsumerConfig{
 		Brokers: brokers,
@@ -31,6 +32,7 @@ func main() {
 			infrakafka.TopicOrderInventory,
 			infrakafka.TopicOrderNotification,
 		},
+		DLQWriter: dlq,
 	})
 	defer func() { _ = consumer.Close() }()
 
@@ -45,8 +47,9 @@ func main() {
 
 	sagaRepo := infrapostgres.NewSagaRepository(pool)
 	eventLog := infrapostgres.NewEventLogRepository(pool)
+	publisher := outbox.NewPublisher(infrapostgres.NewOutboxRepository(pool))
 
-	orch := orchestrator.New(producer, sagaRepo, eventLog, 3)
+	orch := orchestrator.New(publisher, sagaRepo, eventLog, 3)
 
 	log.Println("orquestrador: aguardando eventos")
 	if err := consumer.Consume(ctx, interfaces.WithLogging("orchestrator", orch.HandleEvent)); err != nil && ctx.Err() == nil {

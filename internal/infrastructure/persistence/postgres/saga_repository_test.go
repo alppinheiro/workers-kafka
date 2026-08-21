@@ -33,7 +33,7 @@ func newTestPool(t *testing.T) *pgxpool.Pool {
 func cleanSagas(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx := context.Background()
-	for _, table := range []string{"saga_events", "sagas"} {
+	for _, table := range []string{"saga_events", "sagas", "outbox"} {
 		if _, err := pool.Exec(ctx, "DELETE FROM "+table); err != nil {
 			t.Fatalf("falha ao limpar %s: %v", table, err)
 		}

@@ -25,3 +25,14 @@ var topicForEventType = map[domain.EventType]string{
 	domain.EventNotificationCommand:     TopicOrderNotification,
 	domain.EventNotificationResult:      TopicOrderNotification,
 }
+
+// DLQTopicFor retorna o tópico de dead letter associado a um tópico de origem.
+func DLQTopicFor(topic string) string {
+	return topic + ".dlq"
+}
+
+// TopicForEventType retorna o tópico do evento e true se o tipo for conhecido.
+func TopicForEventType(eventType domain.EventType) (string, bool) {
+	topic, ok := topicForEventType[eventType]
+	return topic, ok
+}

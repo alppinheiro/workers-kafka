@@ -34,8 +34,14 @@ func New(publisher application.EventPublisher, sagas application.SagaRepository,
 // StartOrder inicia uma nova saga em PENDING a partir do ORDER_CREATED e dispara o
 // primeiro comando do fluxo.
 func (o *Orchestrator) StartOrder(ctx context.Context, event domain.Event) error {
+	if seen, err := o.alreadyProcessed(ctx, event.EventID, event.OrderID, event.EventType); err != nil {
+		return err
+	} else if seen {
+		return nil // ORDER_CREATED já processado (redelivery)
+	}
+
 	if _, err := o.sagas.Load(ctx, event.OrderID); err == nil {
-		return fmt.Errorf("saga já iniciada para o pedido %s", event.OrderID)
+		return fmt.Errorf("%w: saga já iniciada para o pedido %s", application.ErrNonRetryable, event.OrderID)
 	} else if err != application.ErrSagaNotFound {
 		return fmt.Errorf("erro ao verificar saga para o pedido %s: %w", event.OrderID, err)
 	}
@@ -76,9 +82,15 @@ func (o *Orchestrator) HandleResult(ctx context.Context, event domain.Event) err
 	saga, err := o.sagas.Load(ctx, event.OrderID)
 	if err != nil {
 		if err == application.ErrSagaNotFound {
-			return fmt.Errorf("saga desconhecida para o pedido %s", event.OrderID)
+			return fmt.Errorf("%w: saga desconhecida para o pedido %s", application.ErrNonRetryable, event.OrderID)
 		}
 		return fmt.Errorf("erro ao carregar saga para o pedido %s: %w", event.OrderID, err)
+	}
+
+	if seen, err := o.alreadyProcessed(ctx, event.EventID, event.OrderID, event.EventType); err != nil {
+		return err
+	} else if seen {
+		return nil // resultado já processado (redelivery)
 	}
 
 	if err := o.logEvent(ctx, saga, event.EventID, event.EventType, application.DirectionIn, event.StatusAtual, event, nil, nil); err != nil {
@@ -91,11 +103,11 @@ func (o *Orchestrator) HandleResult(ctx context.Context, event domain.Event) err
 	}
 
 	if saga.Current != expectedStatus {
-		return fmt.Errorf("evento fora de ordem para o pedido %s: resultado %s exige saga em %s, mas estava em %s", event.OrderID, event.EventType, expectedStatus, saga.Current)
+		return fmt.Errorf("%w: evento fora de ordem para o pedido %s: resultado %s exige saga em %s, mas estava em %s", application.ErrNonRetryable, event.OrderID, event.EventType, expectedStatus, saga.Current)
 	}
 
 	if err := validateResultStatus(event.EventType, event.StatusAtual); err != nil {
-		return fmt.Errorf("resultado inválido para o pedido %s: %w", event.OrderID, err)
+		return fmt.Errorf("%w: resultado inválido para o pedido %s: %v", application.ErrNonRetryable, event.OrderID, err)
 	}
 
 	switch event.StatusAtual {
@@ -145,7 +157,7 @@ func (o *Orchestrator) HandleResult(ctx context.Context, event domain.Event) err
 		log.Printf("component=orchestrator phase=decision action=complete-requested order_id=%s saga_id=%s event_id=%s type=%s state_current=%s", event.OrderID, event.SagaID, event.EventID, event.EventType, saga.Current)
 		return o.complete(ctx, &saga, nil)
 	default:
-		return fmt.Errorf("status inesperado recebido pelo orquestrador para o pedido %s: %s", event.OrderID, event.StatusAtual)
+		return fmt.Errorf("%w: status inesperado recebido pelo orquestrador para o pedido %s: %s", application.ErrNonRetryable, event.OrderID, event.StatusAtual)
 	}
 }
 
@@ -288,6 +300,22 @@ func (o *Orchestrator) logEvent(ctx context.Context, saga domain.Saga, eventID s
 		RequestPayload:  requestPayload,
 		ResponsePayload: responsePayload,
 	})
+}
+
+// alreadyProcessed informa se o evento já foi processado pelo orquestrador (idempotência).
+// Eventos duplicados chegam via redelivery do Kafka (at-least-once).
+func (o *Orchestrator) alreadyProcessed(ctx context.Context, eventID string, orderID string, eventType domain.EventType) (bool, error) {
+	if o.eventLog == nil {
+		return false, nil
+	}
+	seen, err := o.eventLog.Has(ctx, eventID, "orchestrator")
+	if err != nil {
+		return false, fmt.Errorf("erro ao verificar duplicidade do evento %s: %w", eventID, err)
+	}
+	if seen {
+		log.Printf("component=orchestrator phase=decision action=duplicate-ignored order_id=%s event_id=%s type=%s", orderID, eventID, eventType)
+	}
+	return seen, nil
 }
 
 // nextCommand mapeia o status atual da saga para o status alvo e o tipo de comando que aciona o próximo worker.

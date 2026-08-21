@@ -102,6 +102,11 @@ services:
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.inventory --partitions 1 --replication-factor 1
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.notification --partitions 1 --replication-factor 1
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.status --partitions 1 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.created.dlq --partitions 1 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.payment.dlq --partitions 1 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.inventory.dlq --partitions 1 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.notification.dlq --partitions 1 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.status.dlq --partitions 1 --replication-factor 1
     restart: "no"
 
   orchestrator:
@@ -172,6 +177,20 @@ services:
       kafka-init:
         condition: service_completed_successfully
       migrations-read:
+        condition: service_completed_successfully
+
+  outbox-relay:
+    build:
+      context: .
+      args:
+        TARGET: cmd/outbox-relay
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      migrations:
         condition: service_completed_successfully
 
   order-status:

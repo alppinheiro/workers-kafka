@@ -245,3 +245,25 @@ func TestPaymentUseCase_LogsRequestResponseAndResult(t *testing.T) {
 		t.Error("response_payload do GATEWAY_RESPONSE não deveria ser nulo")
 	}
 }
+
+// --- idempotência (redelivery) -------------------------------------------------
+
+func TestPaymentUseCase_Handle_DuplicateCommand_Ignored(t *testing.T) {
+	pub := &mockPublisher{}
+	eventLog := &fakeEventLog{}
+	gateway := &mockPaymentGateway{approved: true, transactionID: "tx-1"}
+	uc := NewPaymentUseCase(gateway, pub, eventLog)
+
+	command := paymentCommand("order-001")
+	if err := uc.Handle(context.Background(), command); err != nil {
+		t.Fatalf("primeira chamada falhou: %v", err)
+	}
+	// Redelivery do mesmo PAYMENT_COMMAND deve ser ignorado (sem chamar o gateway de novo).
+	if err := uc.Handle(context.Background(), command); err != nil {
+		t.Fatalf("redelivery deveria ser ignorado, erro: %v", err)
+	}
+
+	if len(pub.events) != 1 {
+		t.Errorf("esperado apenas 1 PAYMENT_RESULT publicado, obtidos %d", len(pub.events))
+	}
+}

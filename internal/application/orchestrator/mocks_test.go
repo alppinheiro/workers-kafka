@@ -74,9 +74,22 @@ func (f *fakeEventLog) Append(_ context.Context, entry application.EventLogEntry
 	return nil
 }
 
+func (f *fakeEventLog) Has(_ context.Context, eventID string, component string) (bool, error) {
+	for _, e := range f.entries {
+		if e.EventID == eventID && e.Component == component {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // mockFailingEventLog simula falha na gravação do journal.
 type mockFailingEventLog struct{}
 
 func (m *mockFailingEventLog) Append(context.Context, application.EventLogEntry) error {
 	return errors.New("falha simulada no journal")
+}
+
+func (m *mockFailingEventLog) Has(context.Context, string, string) (bool, error) {
+	return false, errors.New("falha simulada no journal")
 }

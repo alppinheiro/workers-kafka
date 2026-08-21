@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"workers-kafka/internal/application"
@@ -18,9 +19,13 @@ func newTestOrchestrator(maxRetries int) (*Orchestrator, *mockPublisher) {
 }
 
 // resultEvent cria um evento de resultado com valores mínimos para os testes.
+// O event_id é único por chamada (contador) para respeitar a idempotência.
+var testEventSeq int
+
 func resultEvent(orderID string, eventType domain.EventType, status domain.OrderStatus) domain.Event {
+	testEventSeq++
 	return domain.Event{
-		EventID:       "evt-1",
+		EventID:       fmt.Sprintf("evt-%d", testEventSeq),
 		OrderID:       orderID,
 		SagaID:        orderID,
 		StatusAtual:   status,
@@ -145,7 +150,9 @@ func TestHandleEvent_OrderCreated_DuplicateSaga_ReturnsError(t *testing.T) {
 		t.Fatalf("primeiro ORDER_CREATED falhou: %v", err)
 	}
 
-	err := o.HandleEvent(context.Background(), created)
+	// Um NOVO ORDER_CREATED (event_id diferente) para um pedido já existente é erro.
+	other := resultEvent("order-001", domain.EventOrderCreated, domain.StatusPending)
+	err := o.HandleEvent(context.Background(), other)
 	if err == nil {
 		t.Fatal("esperado erro ao criar saga duplicada")
 	}
@@ -789,5 +796,54 @@ func TestFail_LogsTerminalOut(t *testing.T) {
 	}
 	if !found {
 		t.Error("journal deveria registrar OUT do ORDER_FAILED")
+	}
+}
+
+// --- idempotência (redelivery) -------------------------------------------------
+
+func TestStartOrder_DuplicateEvent_Ignored(t *testing.T) {
+	o, pub := newTestOrchestrator(3)
+
+	event := resultEvent("order-001", domain.EventOrderCreated, domain.StatusPending)
+	if err := o.StartOrder(context.Background(), event); err != nil {
+		t.Fatalf("primeira chamada falhou: %v", err)
+	}
+	// Redelivery do mesmo ORDER_CREATED (mesmo event_id) deve ser ignorado.
+	if err := o.StartOrder(context.Background(), event); err != nil {
+		t.Fatalf("redelivery deveria ser ignorado, erro: %v", err)
+	}
+
+	if len(pub.events) != 1 {
+		t.Errorf("esperado apenas 1 comando publicado (PAYMENT_COMMAND), obtidos %v", pub.events)
+	}
+}
+
+func TestHandleResult_DuplicateEvent_Ignored(t *testing.T) {
+	o, pub := newTestOrchestrator(3)
+	startOrder(t, o, "order-001")
+
+	event := resultEvent("order-001", domain.EventPaymentResult, domain.StatusPaymentApproved)
+	event.TransactionID = "tx-123"
+	if err := o.HandleResult(context.Background(), event); err != nil {
+		t.Fatalf("primeira chamada falhou: %v", err)
+	}
+	// Redelivery do mesmo PAYMENT_RESULT não deve avançar a saga de novo.
+	if err := o.HandleResult(context.Background(), event); err != nil {
+		t.Fatalf("redelivery deveria ser ignorado, erro: %v", err)
+	}
+
+	state := currentState(t, o, "order-001")
+	if state.Current != domain.StatusPaymentApproved {
+		t.Errorf("saga deveria continuar em %s, obtido %s", domain.StatusPaymentApproved, state.Current)
+	}
+
+	commandCount := 0
+	for _, e := range pub.events {
+		if e.EventType == domain.EventInventoryCommand {
+			commandCount++
+		}
+	}
+	if commandCount != 1 {
+		t.Errorf("esperado 1 INVENTORY_COMMAND publicado, obtidos %d", commandCount)
 	}
 }

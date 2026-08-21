@@ -41,13 +41,20 @@ A evolução foi dividida em 5 fases sequenciais. A ordem é crítica: não otim
 ## 🧱 Fase 3: O Escudo de Resiliência (Robustez e DLQ)
 **Objetivo:** Garantir a estabilidade do pipeline diante de "poison pills" e duplicidades.
 
-- [ ] **Dead Letter Queues (DLQ):**
-    - Criar tópicos de erro (ex: \`orders.payment.dlq\`).
+✅ **Concluída** — ver `PHASE_3_PLAN.md` para o plano detalhado.
+
+- [x] **Dead Letter Queues (DLQ):**
+    - Criar tópicos de erro (ex: `orders.payment.dlq`).
     - Mover mensagens que excederam o limite de retry para a DLQ em vez de descartá-las.
-- [ ] **Idempotência:**
-    - Implementar a verificação de \`event_id\` ou \`status_anterior\` no DB para evitar processamento duplo de mensagens.
-- [ ] **Gestão de Erros:**
+    - Erros definitivos (`ErrNonRetryable`) → DLQ + commit; erros transitórios → retry.
+- [x] **Idempotência:**
+    - Implementar a verificação de `event_id` ou `status_anterior` no DB para evitar processamento duplo de mensagens.
+    - `EventLogRepository.Has(event_id, component)`: orquestrador e workers ignoram eventos cujo `IN` já foi registrado.
+- [x] **Gestão de Erros:**
     - Diferenciar erros transitórios (Network) de erros definitivos (Business Logic) para decidir sobre o retry.
+- [x] **Outbox Pattern:**
+    - Tabela `outbox` no banco de escrita + `OutboxPublisher` + serviço `outbox-relay` que publica no Kafka.
+    - Eliminar a dependência de publish direto durante o processamento.
 
 ## 👁️ Fase 4: Os Olhos do Sistema (Observabilidade Distribuída)
 **Objetivo:** Rastrear pedidos em tempo real através de múltiplos workers.

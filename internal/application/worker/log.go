@@ -34,3 +34,12 @@ func appendLog(ctx context.Context, eventLog application.EventLogRepository, com
 		ResponsePayload: responsePayload,
 	})
 }
+
+// alreadyProcessed informa se o evento já foi processado pelo worker (idempotência).
+// Comandos duplicados chegam via redelivery do Kafka (at-least-once).
+func alreadyProcessed(ctx context.Context, eventLog application.EventLogRepository, component string, event domain.Event) (bool, error) {
+	if eventLog == nil {
+		return false, nil
+	}
+	return eventLog.Has(ctx, event.EventID, component)
+}

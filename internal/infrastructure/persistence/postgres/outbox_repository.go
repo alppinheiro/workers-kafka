@@ -1,0 +1,76 @@
+package postgres
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// OutboxEntry representa um evento registrado na outbox aguardando publicação no Kafka.
+type OutboxEntry struct {
+	ID      int64
+	EventID string
+	Topic   string
+	Key     string
+	Payload []byte
+}
+
+// OutboxRepository persiste eventos a publicar no Kafka (Outbox Pattern).
+type OutboxRepository struct {
+	pool *pgxpool.Pool
+}
+
+// NewOutboxRepository cria o repositório da outbox sobre o pool informado.
+func NewOutboxRepository(pool *pgxpool.Pool) *OutboxRepository {
+	return &OutboxRepository{pool: pool}
+}
+
+// Append insere um evento na outbox. A gravação é idempotente por event_id (UNIQUE).
+func (r *OutboxRepository) Append(ctx context.Context, entry OutboxEntry) error {
+	const query = `
+INSERT INTO outbox (event_id, topic, key, payload)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (event_id) DO NOTHING`
+
+	_, err := r.pool.Exec(ctx, query, entry.EventID, entry.Topic, entry.Key, entry.Payload)
+	if err != nil {
+		return fmt.Errorf("erro ao gravar evento %s na outbox: %w", entry.EventID, err)
+	}
+	return nil
+}
+
+// FetchPending retorna até limit eventos ainda não publicados, em ordem de criação.
+func (r *OutboxRepository) FetchPending(ctx context.Context, limit int) ([]OutboxEntry, error) {
+	const query = `
+SELECT id, event_id, topic, key, payload FROM outbox
+WHERE published_at IS NULL
+ORDER BY id
+LIMIT $1`
+
+	rows, err := r.pool.Query(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("erro ao consultar outbox pendente: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []OutboxEntry
+	for rows.Next() {
+		var e OutboxEntry
+		if err := rows.Scan(&e.ID, &e.EventID, &e.Topic, &e.Key, &e.Payload); err != nil {
+			return nil, fmt.Errorf("erro ao ler outbox pendente: %w", err)
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+// MarkPublished marca um evento como publicado.
+func (r *OutboxRepository) MarkPublished(ctx context.Context, id int64) error {
+	const query = `UPDATE outbox SET published_at = now() WHERE id = $1`
+
+	if _, err := r.pool.Exec(ctx, query, id); err != nil {
+		return fmt.Errorf("erro ao marcar outbox %d como publicado: %w", id, err)
+	}
+	return nil
+}

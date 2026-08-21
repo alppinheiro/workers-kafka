@@ -30,7 +30,15 @@ func (uc *NotificationUseCase) Handle(ctx context.Context, event domain.Event) e
 	}
 
 	if event.StatusAtual != domain.StatusInventoryReserved {
-		return fmt.Errorf("comando de notificação inválido para o pedido %s: status esperado %s, recebido %s", event.OrderID, domain.StatusInventoryReserved, event.StatusAtual)
+		return fmt.Errorf("%w: comando de notificação inválido para o pedido %s: status esperado %s, recebido %s", application.ErrNonRetryable, event.OrderID, domain.StatusInventoryReserved, event.StatusAtual)
+	}
+
+	seen, err := alreadyProcessed(ctx, uc.eventLog, componentNotification, event)
+	if err != nil {
+		return err
+	}
+	if seen {
+		return nil // comando já processado (redelivery)
 	}
 
 	if err := appendLog(ctx, uc.eventLog, componentNotification, event, application.DirectionIn, nil, nil); err != nil {

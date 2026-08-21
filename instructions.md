@@ -15,7 +15,7 @@ A ideia principal é simular o ciclo de vida de um pedido com mudança de status
 - Estado do orquestrador: persistido em PostgreSQL (tabela `sagas`), com recuperação após restart; todos os eventos e payloads de request/response dos gateways registrados em `saga_events` (rastreabilidade).
 - Serialização: JSON no início, com schema versionado e evolutivo.
 - Kafka em Go: `github.com/segmentio/kafka-go` como escolha inicial, isolado por interfaces.
-- Escopo atual: testes unitários implementados (Fase 1); persistência e rastreabilidade em execução (Fase 2); observabilidade e goroutines explícitas ainda fora de escopo.
+- Escopo atual: testes unitários implementados (Fase 1); persistência, rastreabilidade e read model implementados (Fase 2); outbox, DLQ e idempotência implementados (Fase 3); observabilidade e goroutines explícitas ainda fora de escopo.
 
 As seções abaixo detalham e complementam esse resumo, evitando repetir decisões já fechadas quando possível.
 
@@ -361,6 +361,8 @@ Este fluxo já está consolidado no topo do documento e segue a sequência `PEND
 - Banco de escrita em `postgres:5433` (db `saga`) e banco de leitura em `postgres-read:5434` (db `saga_read`), com migrations `golang-migrate/migrate` via docker.
 - Garantia de dados: at-least-once + dedup por `event_id` + reentrega do Kafka; Outbox Pattern adiado para a Fase 3.
 - Consulta do read model nesta fase via SQL (psql); API REST de consulta de pedido fica para uma fase futura.
+- Fase 3 (resiliência) concluída conforme `PHASE_3_PLAN.md`: idempotência por `event_id` (orquestrador e workers), DLQ por tópico (`orders.*.dlq`) com erros definitivos (`ErrNonRetryable`), e Outbox Pattern (tabela `outbox` + `OutboxPublisher` + serviço `outbox-relay`).
+- A ordem de escrita nos handlers é: Save/Append (estado + journal) → Outbox; a reentrega do Kafka + idempotência cobrem os gaps. A transação atômica única (estado + journal + outbox) é refinamento futuro documentado.
 
 ## Observação
 

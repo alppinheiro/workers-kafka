@@ -1,6 +1,6 @@
 COMPOSE ?= docker-compose
 ORDER_ID ?= order-001
-SERVICES = kafka kafka-init postgres migrations postgres-read migrations-read orchestrator worker-payment worker-inventory worker-notification order-status projector
+SERVICES = kafka kafka-init postgres migrations postgres-read migrations-read orchestrator worker-payment worker-inventory worker-notification order-status projector outbox-relay
 
 .PHONY: help fmt build vet test lint check up down logs ps create-order inspect rebuild
 
@@ -60,4 +60,4 @@ inspect:
 	$(COMPOSE) exec postgres-read psql -U saga -d saga_read -c "SELECT order_id, current_status, last_event_type, last_event_at, transaction_id, notification_error, payment_refund_failed FROM order_views WHERE order_id='$(ORDER_ID)'"
 
 rebuild:
-	$(COMPOSE) build orchestrator worker-payment worker-inventory worker-notification order-status projector create-order
+	$(COMPOSE) build orchestrator worker-payment worker-inventory worker-notification order-status projector outbox-relay create-order

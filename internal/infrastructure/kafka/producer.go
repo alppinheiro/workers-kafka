@@ -101,6 +101,19 @@ func (p *Producer) Publish(ctx context.Context, event domain.Event) error {
 	return nil
 }
 
+// PublishRaw publica um payload já serializado em um tópico específico (usado pelo
+// outbox-relay, que não precisa desserializar o evento).
+func (p *Producer) PublishRaw(ctx context.Context, topic string, key string, payload []byte) error {
+	if err := p.writer.WriteMessages(ctx, kafkago.Message{
+		Topic: topic,
+		Key:   []byte(key),
+		Value: payload,
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Close libera os recursos do writer subjacente.
 func (p *Producer) Close() error {
 	return p.writer.Close()

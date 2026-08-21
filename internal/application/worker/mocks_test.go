@@ -77,4 +77,13 @@ func (f *fakeEventLog) Append(_ context.Context, entry application.EventLogEntry
 	return nil
 }
 
+func (f *fakeEventLog) Has(_ context.Context, eventID string, component string) (bool, error) {
+	for _, e := range f.entries {
+		if e.EventID == eventID && e.Component == component {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 var errSimulado = errors.New("erro simulado do gateway")

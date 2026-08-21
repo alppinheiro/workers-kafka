@@ -79,6 +79,8 @@ type EventLogEntry struct {
 // EventLogRepository persiste o journal de eventos (append-only) para rastreabilidade.
 type EventLogRepository interface {
 	Append(ctx context.Context, entry EventLogEntry) error
+	// Has informa se um evento já foi registrado por um componente (idempotência).
+	Has(ctx context.Context, eventID string, component string) (bool, error)
 }
 
 // OrderViewRepository persiste o read model de pedidos no banco de leitura.

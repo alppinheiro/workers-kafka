@@ -60,6 +60,17 @@ ON CONFLICT (event_id, component, direction) DO NOTHING`
 	return nil
 }
 
+// Has informa se um evento já foi registrado por um componente (idempotência).
+func (r *EventLogRepository) Has(ctx context.Context, eventID string, component string) (bool, error) {
+	const query = `SELECT EXISTS(SELECT 1 FROM saga_events WHERE event_id = $1 AND component = $2)`
+
+	var exists bool
+	if err := r.pool.QueryRow(ctx, query, eventID, component).Scan(&exists); err != nil {
+		return false, fmt.Errorf("erro ao verificar evento %s no journal: %w", eventID, err)
+	}
+	return exists, nil
+}
+
 func marshalJSON(v any) ([]byte, error) {
 	if v == nil {
 		return nil, nil

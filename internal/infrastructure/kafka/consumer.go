@@ -3,6 +3,7 @@ package kafka
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -23,11 +24,15 @@ type ConsumerConfig struct {
 	Topic string
 	// Topics permite acompanhar múltiplos tópicos com um único reader, evitando goroutines adicionais.
 	Topics []string
+	// DLQWriter, quando definido, recebe mensagens com erro definitivo (application.ErrNonRetryable),
+	// que são movidas para o tópico DLQ correspondente e commitadas.
+	DLQWriter *kafkago.Writer
 }
 
 // Consumer lê eventos de Kafka e os repassa, já desserializados, para um application.EventHandler.
 type Consumer struct {
 	reader *kafkago.Reader
+	dlq    *kafkago.Writer
 }
 
 // NewConsumer cria um consumer a partir da configuração informada.
@@ -39,10 +44,13 @@ func NewConsumer(cfg ConsumerConfig) *Consumer {
 			Topic:       cfg.Topic,
 			GroupTopics: cfg.Topics,
 		}),
+		dlq: cfg.DLQWriter,
 	}
 }
 
-// Consume lê mensagens continuamente até que o contexto seja encerrado, desserializando e processando cada evento.
+// Consume lê mensagens continuamente até que o contexto seja encerrado, desserializando e
+// processando cada evento. Mensagens com erro definitivo são movidas para a DLQ; demais
+// erros são retornados (a mensagem não é commitada e será reentregue).
 func (c *Consumer) Consume(ctx context.Context, handler application.EventHandler) error {
 	for {
 		msg, err := c.reader.FetchMessage(ctx)
@@ -59,17 +67,52 @@ func (c *Consumer) Consume(ctx context.Context, handler application.EventHandler
 
 		var event domain.Event
 		if err := json.Unmarshal(msg.Value, &event); err != nil {
+			moved, moveErr := c.moveToDLQ(ctx, msg, fmt.Errorf("%w: erro ao desserializar evento: %v", application.ErrNonRetryable, err))
+			if moveErr != nil {
+				return moveErr
+			}
+			if moved {
+				continue
+			}
 			return fmt.Errorf("erro ao desserializar evento: %w", err)
 		}
 
 		if err := handler(ctx, event); err != nil {
-			return fmt.Errorf("erro ao processar evento %s: %w", event.EventID, err)
+			moved, moveErr := c.moveToDLQ(ctx, msg, fmt.Errorf("erro ao processar evento %s: %w", event.EventID, err))
+			if moveErr != nil {
+				return moveErr
+			}
+			if moved {
+				continue
+			}
+			return err
 		}
 
 		if err := c.reader.CommitMessages(ctx, msg); err != nil {
 			return fmt.Errorf("erro ao confirmar mensagem: %w", err)
 		}
 	}
+}
+
+// moveToDLQ move uma mensagem com erro definitivo para a DLQ do tópico de origem e a
+// commita, retornando true. Se não houver DLQ configurada ou o erro não for definitivo
+// (transitório), retorna false e a mensagem permanece pendente para retry.
+func (c *Consumer) moveToDLQ(ctx context.Context, msg kafkago.Message, err error) (bool, error) {
+	if c.dlq == nil || !errors.Is(err, application.ErrNonRetryable) {
+		return false, nil
+	}
+
+	dlqTopic := DLQTopicFor(msg.Topic)
+	if writeErr := c.dlq.WriteMessages(ctx, kafkago.Message{Topic: dlqTopic, Key: msg.Key, Value: msg.Value}); writeErr != nil {
+		return false, fmt.Errorf("erro ao mover mensagem para a DLQ %s: %w", dlqTopic, writeErr)
+	}
+
+	log.Printf("component=consumer phase=dlq topic=%s dlq_topic=%s offset=%d error=%v", msg.Topic, dlqTopic, msg.Offset, err)
+
+	if commitErr := c.reader.CommitMessages(ctx, msg); commitErr != nil {
+		return false, fmt.Errorf("erro ao confirmar mensagem movida para a DLQ: %w", commitErr)
+	}
+	return true, nil
 }
 
 // Close libera os recursos do reader subjacente.

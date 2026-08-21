@@ -57,6 +57,21 @@ func TestBrokersFromEnv_Multiple(t *testing.T) {
 	}
 }
 
+func TestDLQTopicFor(t *testing.T) {
+	cases := map[string]string{
+		TopicOrderCreated:      TopicOrderCreated + ".dlq",
+		TopicOrderPayment:      TopicOrderPayment + ".dlq",
+		TopicOrderInventory:    TopicOrderInventory + ".dlq",
+		TopicOrderNotification: TopicOrderNotification + ".dlq",
+		TopicOrderStatus:       TopicOrderStatus + ".dlq",
+	}
+	for topic, want := range cases {
+		if got := DLQTopicFor(topic); got != want {
+			t.Errorf("DLQTopicFor(%q) = %q, esperado %q", topic, got, want)
+		}
+	}
+}
+
 func TestFormatMetadata_Empty(t *testing.T) {
 	if got := formatMetadata(nil); got != "-" {
 		t.Errorf("esperado '-', obtido %q", got)

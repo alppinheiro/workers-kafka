@@ -28,17 +28,17 @@ func (uc *PaymentUseCase) Handle(ctx context.Context, event domain.Event) error 
 	switch event.EventType {
 	case domain.EventPaymentCommand:
 		if event.StatusAtual != domain.StatusPaymentPending {
-			return fmt.Errorf("comando de pagamento inválido para o pedido %s: status esperado %s, recebido %s", event.OrderID, domain.StatusPaymentPending, event.StatusAtual)
+			return fmt.Errorf("%w: comando de pagamento inválido para o pedido %s: status esperado %s, recebido %s", application.ErrNonRetryable, event.OrderID, domain.StatusPaymentPending, event.StatusAtual)
 		}
 		return uc.process(ctx, event)
 
 	case domain.EventPaymentCompensate:
 		// comando de estorno assíncrono
 		if event.StatusAtual != domain.StatusPaymentRefundPending {
-			return fmt.Errorf("comando de estorno inválido para o pedido %s: status esperado %s, recebido %s", event.OrderID, domain.StatusPaymentRefundPending, event.StatusAtual)
+			return fmt.Errorf("%w: comando de estorno inválido para o pedido %s: status esperado %s, recebido %s", application.ErrNonRetryable, event.OrderID, domain.StatusPaymentRefundPending, event.StatusAtual)
 		}
 		if event.TransactionID == "" {
-			return fmt.Errorf("comando de estorno inválido para o pedido %s: transaction_id ausente", event.OrderID)
+			return fmt.Errorf("%w: comando de estorno inválido para o pedido %s: transaction_id ausente", application.ErrNonRetryable, event.OrderID)
 		}
 		return uc.refund(ctx, event)
 
@@ -48,6 +48,14 @@ func (uc *PaymentUseCase) Handle(ctx context.Context, event domain.Event) error 
 }
 
 func (uc *PaymentUseCase) process(ctx context.Context, event domain.Event) error {
+	seen, err := alreadyProcessed(ctx, uc.eventLog, componentPayment, event)
+	if err != nil {
+		return err
+	}
+	if seen {
+		return nil // comando já processado (redelivery)
+	}
+
 	if err := appendLog(ctx, uc.eventLog, componentPayment, event, application.DirectionIn, nil, nil); err != nil {
 		return err
 	}
@@ -95,6 +103,14 @@ func (uc *PaymentUseCase) process(ctx context.Context, event domain.Event) error
 }
 
 func (uc *PaymentUseCase) refund(ctx context.Context, event domain.Event) error {
+	seen, err := alreadyProcessed(ctx, uc.eventLog, componentPayment, event)
+	if err != nil {
+		return err
+	}
+	if seen {
+		return nil // comando já processado (redelivery)
+	}
+
 	if err := appendLog(ctx, uc.eventLog, componentPayment, event, application.DirectionIn, nil, nil); err != nil {
 		return err
 	}

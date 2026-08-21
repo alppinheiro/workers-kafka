@@ -30,7 +30,15 @@ func (uc *InventoryUseCase) Handle(ctx context.Context, event domain.Event) erro
 	}
 
 	if event.StatusAtual != domain.StatusPaymentApproved {
-		return fmt.Errorf("comando de estoque inválido para o pedido %s: status esperado %s, recebido %s", event.OrderID, domain.StatusPaymentApproved, event.StatusAtual)
+		return fmt.Errorf("%w: comando de estoque inválido para o pedido %s: status esperado %s, recebido %s", application.ErrNonRetryable, event.OrderID, domain.StatusPaymentApproved, event.StatusAtual)
+	}
+
+	seen, err := alreadyProcessed(ctx, uc.eventLog, componentInventory, event)
+	if err != nil {
+		return err
+	}
+	if seen {
+		return nil // comando já processado (redelivery)
 	}
 
 	if err := appendLog(ctx, uc.eventLog, componentInventory, event, application.DirectionIn, nil, nil); err != nil {

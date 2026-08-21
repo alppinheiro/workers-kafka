@@ -38,6 +38,9 @@ Leituras mais úteis neste README:
 - estado da saga persistido em PostgreSQL (banco de escrita) com recuperação após restart
 - todos os eventos gravados em `saga_events` (journal) com payloads de request/response
 - read model `order_views` no banco de leitura, projetado via Kafka pelo `projector`
+- outbox pattern: eventos decididos são registrados na outbox e publicados pelo `outbox-relay`
+- DLQ: mensagens com erro definitivo vão para tópicos `orders.*.dlq`
+- idempotência por `event_id` no orquestrador e nos workers
 - cenários determinísticos por `order_id` para reproduzir falhas e retries
 - debug ponta a ponta com VS Code, Docker e logs correlacionados
 
@@ -167,9 +170,10 @@ flowchart LR
   PROJ --> PGR[(postgres-read: leitura)]
 ```
 
-- **Banco de escrita** (`postgres`, :5433): orquestrador e workers persistem o estado da saga (`sagas`) e o journal de todos os eventos com payloads de request/response dos gateways (`saga_events`).
+- **Banco de escrita** (`postgres`, :5433): orquestrador e workers persistem o estado da saga (`sagas`), o journal de todos os eventos com payloads de request/response dos gateways (`saga_events`) e os eventos a publicar (`outbox`).
 - **Banco de leitura** (`postgres-read`, :5434): o serviço **`projector`** consome os cinco tópicos do Kafka e monta o read model (`order_views`) + dedup (`processed_events`), pronto para uma futura API de consulta.
 - **Garantia de dados**: at-least-once + dedup por `event_id` + reentrega do Kafka; o orquestrador pode ser reiniciado no meio de uma saga e ela continua de onde parou.
+- **Publicação**: orquestrador e workers escrevem eventos na **outbox** (banco de escrita); o serviço **`outbox-relay`** publica de fato no Kafka e marca `published_at`. Erros definitivos vão para tópicos DLQ (`orders.*.dlq`).
 
 ## Fluxo Ponta a Ponta
 
@@ -638,7 +642,9 @@ Serialização atual:
 - estado do orquestrador persistido em PostgreSQL (banco de escrita)
 - journal de eventos (`saga_events`) para rastreabilidade com payloads de request/response
 - banco de leitura com read model (`order_views`) alimentado por projeção via Kafka (CQRS)
-- garantia at-least-once + dedup por `event_id`; Outbox Pattern previsto para a Fase 3
+- outbox pattern: eventos decididos vão para a outbox e são publicados pelo `outbox-relay`
+- DLQ: erros definitivos vão para `orders.*.dlq`; idempotência por `event_id`
+- garantia at-least-once + dedup por `event_id` + reentrega do Kafka
 - tópicos separados por etapa
 - eventos terminais enviados para `orders.status`
 - debug orientado por correlação de logs e cenários dirigidos por `order_id`
@@ -653,20 +659,22 @@ Incluído nesta fase:
 - simuladores externos
 - persistência do estado da saga e journal de eventos (PostgreSQL)
 - read model no banco de leitura com serviço `projector`
+- outbox pattern com serviço `outbox-relay`
+- DLQ (tópicos `orders.*.dlq`) e idempotência por `event_id`
 - migrations com `golang-migrate` via Docker
 - Docker para execução local
 - debug ponta a ponta no VS Code
 
 ## O Que Este Projeto Ainda Não Faz
 
-- Outbox Pattern, DLQ e idempotência completa (Fase 3)
+- transação atômica única (estado + journal + outbox) — refinamento futuro documentado
 - API REST de consulta de pedido (o read model `order_views` já está pronto para isso)
 - observabilidade formal com tracing e métricas
 - tratamento de produção com políticas avançadas de retry
 
 Fora de escopo nesta fase:
 
-- Outbox Pattern / DLQ / idempotência persistida
+- transação atômica única (estado + journal + outbox)
 - API REST
 - observabilidade formal
 - integração automatizada (testcontainers)
@@ -674,9 +682,9 @@ Fora de escopo nesta fase:
 
 ## Próximos Passos Naturais
 
-- Fase 3: Outbox Pattern, DLQ e idempotência completa por `event_id`
+- Fase 4: observabilidade distribuída (OpenTelemetry + Jaeger)
 - API REST de consulta de pedido lendo o read model `order_views`
+- transação atômica única (estado + journal + outbox) para eliminar janelas residuais
 - testes de integração com testcontainers (Kafka + Postgres reais)
-- introduzir observabilidade estruturada
 - comparar versão sequencial com versão concorrente
 - evoluir o contrato de mensagens conforme novos cenários# workers-kafka

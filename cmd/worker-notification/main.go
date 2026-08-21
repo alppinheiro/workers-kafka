@@ -10,6 +10,7 @@ import (
 	"workers-kafka/internal/application/worker"
 	"workers-kafka/internal/infrastructure/external"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
+	"workers-kafka/internal/infrastructure/outbox"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 	"workers-kafka/internal/interfaces"
 )
@@ -18,13 +19,14 @@ import (
 func main() {
 	brokers := infrakafka.BrokersFromEnv()
 
-	producer := infrakafka.NewProducer(brokers)
-	defer func() { _ = producer.Close() }()
+	dlq := infrakafka.NewDLQWriter(brokers)
+	defer func() { _ = dlq.Close() }()
 
 	consumer := infrakafka.NewConsumer(infrakafka.ConsumerConfig{
-		Brokers: brokers,
-		GroupID: "worker-notification",
-		Topic:   infrakafka.TopicOrderNotification,
+		Brokers:   brokers,
+		GroupID:   "worker-notification",
+		Topic:     infrakafka.TopicOrderNotification,
+		DLQWriter: dlq,
 	})
 	defer func() { _ = consumer.Close() }()
 
@@ -40,7 +42,8 @@ func main() {
 	defer pool.Close()
 
 	eventLog := infrapostgres.NewEventLogRepository(pool)
-	useCase := worker.NewNotificationUseCase(gateway, producer, eventLog)
+	publisher := outbox.NewPublisher(infrapostgres.NewOutboxRepository(pool))
+	useCase := worker.NewNotificationUseCase(gateway, publisher, eventLog)
 
 	log.Println("worker de notificação: aguardando comandos")
 	if err := consumer.Consume(ctx, interfaces.WithLogging("worker-notification", useCase.Handle)); err != nil && ctx.Err() == nil {
