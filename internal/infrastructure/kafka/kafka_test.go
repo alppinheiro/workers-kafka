@@ -105,14 +105,99 @@ func TestShouldRetryFetch(t *testing.T) {
 		t.Error("erro comum não deveria ser classificado como retry")
 	}
 
-	if !shouldRetryFetch(kafkago.GroupCoordinatorNotAvailable) {
-		t.Error("GroupCoordinatorNotAvailable deveria exigir retry")
+	retryable := []error{
+		kafkago.GroupCoordinatorNotAvailable,
+		kafkago.NotCoordinatorForGroup,
+		kafkago.GroupLoadInProgress,
+		kafkago.UnknownTopicOrPartition,
+		kafkago.LeaderNotAvailable,
+		kafkago.NotLeaderForPartition,
+		kafkago.BrokerNotAvailable,
+		kafkago.RebalanceInProgress,
+		kafkago.UnknownMemberId,
 	}
-	if !shouldRetryFetch(kafkago.NotCoordinatorForGroup) {
-		t.Error("NotCoordinatorForGroup deveria exigir retry")
+	for _, err := range retryable {
+		if !shouldRetryFetch(err) {
+			t.Errorf("%v deveria exigir retry", err)
+		}
 	}
-	if !shouldRetryFetch(kafkago.GroupLoadInProgress) {
-		t.Error("GroupLoadInProgress deveria exigir retry")
+}
+
+func TestShouldRetryCommit(t *testing.T) {
+	if !shouldRetryCommit(kafkago.UnknownTopicOrPartition) {
+		t.Error("UnknownTopicOrPartition deveria ser retry de commit (não-fatal)")
+	}
+	if shouldRetryCommit(errors.New("erro comum")) {
+		t.Error("erro comum não deveria ser classificado como retry de commit")
+	}
+}
+
+func TestCommitBatcher_ByCount(t *testing.T) {
+	now := time.Now()
+	b := newCommitBatcher(50, time.Hour)
+	for i := 0; i < 49; i++ {
+		b.add()
+		if b.shouldFlush(now) {
+			t.Fatalf("não deveria flush com %d pendentes (< 50)", i+1)
+		}
+	}
+	b.add() // 50ª mensagem
+	if !b.shouldFlush(now) {
+		t.Fatal("deveria flush ao atingir o batch de 50")
+	}
+	b.reset(now)
+	if b.shouldFlush(now.Add(time.Millisecond)) {
+		t.Fatal("após reset, não deveria flush imediato")
+	}
+}
+
+func TestCommitBatcher_ByInterval(t *testing.T) {
+	b := newCommitBatcher(1_000_000, 200*time.Millisecond)
+	now := time.Now()
+	b.add()
+	if b.shouldFlush(now.Add(100 * time.Millisecond)) {
+		t.Fatal("ainda dentro do intervalo, não deveria flush")
+	}
+	if !b.shouldFlush(now.Add(250 * time.Millisecond)) {
+		t.Fatal("passou o intervalo, deveria flush")
+	}
+}
+
+func TestCommitBatchFromEnv_Defaults(t *testing.T) {
+	t.Setenv("KAFKA_COMMIT_BATCH", "")
+	if got := CommitBatchFromEnv(); got != 50 {
+		t.Errorf("esperado default 50, obtido %d", got)
+	}
+	t.Setenv("KAFKA_COMMIT_BATCH", "abc")
+	if got := CommitBatchFromEnv(); got != 50 {
+		t.Errorf("esperado fallback 50 para valor inválido, obtido %d", got)
+	}
+	t.Setenv("KAFKA_COMMIT_BATCH", "250")
+	if got := CommitBatchFromEnv(); got != 250 {
+		t.Errorf("esperado 250, obtido %d", got)
+	}
+}
+
+func TestCommitIntervalFromEnv_Defaults(t *testing.T) {
+	t.Setenv("KAFKA_COMMIT_INTERVAL", "")
+	if got := CommitIntervalFromEnv(); got != 200*time.Millisecond {
+		t.Errorf("esperado default 200ms, obtido %v", got)
+	}
+	t.Setenv("KAFKA_COMMIT_INTERVAL", "500ms")
+	if got := CommitIntervalFromEnv(); got != 500*time.Millisecond {
+		t.Errorf("esperado 500ms, obtido %v", got)
+	}
+}
+
+func TestStallDetected(t *testing.T) {
+	if !stallDetected(10, 10, 45*time.Second, 45*time.Second) {
+		t.Error("sem avanço de fetch e tempo esgotado deveria detectar stall")
+	}
+	if stallDetected(11, 10, 60*time.Second, 45*time.Second) {
+		t.Error("fetch avançou (11 > 10): não é stall")
+	}
+	if stallDetected(10, 10, 10*time.Second, 45*time.Second) {
+		t.Error("tempo insuficiente: não é stall")
 	}
 }
 

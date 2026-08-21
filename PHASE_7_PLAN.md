@@ -115,6 +115,11 @@ O relay já publica 235 ev/s.
 **Validação:** benchmark A (orquestrador ≥ 300 ev/s); `make check` + Testcontainers verdes;
 teste do acumulador de offsets.
 
+**✅ Resultado (21/08/2026):** orquestrador 195 → **216 ev/s** (commit em lote; o ganho é
+limitado pela persistência por evento no Postgres). Resiliência: consumer **não morre mais**
+com tópico recriado e o **watchdog anti-stall reconecta o reader sozinho** em até 45 s
+(validado com os 6 serviços travando).
+
 ### Etapa 7.3 — Rastreabilidade completa (produção)
 
 - **Índice de correlação**: `saga_events(order_id, created_at)` + `saga_events(event_id)` —

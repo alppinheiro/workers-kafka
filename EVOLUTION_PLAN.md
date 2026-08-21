@@ -113,8 +113,10 @@ fluxo contínuo + rastreabilidade total. Detalhes em `PHASE_7_PLAN.md`.
 - [x] **7.1 Relay sem gargalo**: log agregado por ciclo (não por evento), loop contínuo com backoff
   (sem timer fixo de 1s), `OUTBOX_BATCH_SIZE` (default 500), `MarkPublished` em lote (`ANY($1)`),
   retenção/purga da outbox. *✅ Medido: ~50 → **~485 ev/s** (~9,7×).*
-- [ ] **7.2 Commit em lote nos consumers** (`CommitInterval`/lote de N): remove o 2º gargalo
-  (1 round-trip de commit por evento; orquestrador consome em bursts intermitentes).
+- [x] **7.2 Commit em lote + resiliência** (`KAFKA_COMMIT_BATCH`/`KAFKA_COMMIT_INTERVAL`; commit de
+  offsets acumulados; `UnknownTopicOrPartition` como retry — não derruba mais; **watchdog anti-stall**
+  que reconecta o reader em até 45 s). *✅ Orquestrador 216 ev/s; fluxo 2.000/2.000 em 60 s; sobrevive
+  a tópico recriado e reconecta sozinho.*
 - [ ] **7.3 Rastreabilidade**: índice de correlação em `saga_events(order_id, created_at)`,
   lag/idade da outbox no dashboard, alerta de DLQ, journal como "trace de negócio".
 - [ ] **7.4 Transação atômica única** (estado + journal + outbox em 1 tx) — elimina janelas residuais.

@@ -130,6 +130,25 @@ bursts intermitentes) → **Etapa 7.2 (commit em lote) e investigar `kafka-go Gr
 - Novo gargalo: **consumo** (orquestrador 195 ev/s vs relay 235 ev/s) → commit por mensagem
   (~1 round-trip/evento) é o limite da Etapa 7.2.
 
+## Benchmark — A13/A17 (Etapa 7.2: commit em lote + watchdog anti-stall)
+
+| Métrica | A12 (7.1) | A13 (7.2) | A17 (7.2, fluxo saudável) |
+|---|---|---|---|
+| Orquestrador | 195,3 ev/s | **216,1 ev/s** | — |
+| outbox-relay (pub.) | 235,1 ev/s | 248,1 ev/s | — |
+| 3.000 sagas em ~69 s | 2.291 COMPLETED | 2.302 COMPLETED | — |
+| 2.000 sagas em ~60 s | — | — | **1.505 COMPLETED + 495 FAILED (100%)** |
+
+**Resiliência (7.2):**
+- Orquestrador **sobrevive** à recriação de tópico (`UnknownTopicOrPartition` agora é retry,
+  não `exit 1`).
+- **Watchdog anti-stall**: quando o kafka-go para de fazer fetch (travamento conhecido sem erro
+  aparente — reproduzido com `--alter --partitions`), o consumer detecta em até 45 s e **reconecta
+  o reader sozinho** (`phase=stall-detected` → `phase=reconnect`), sem intervenção. Validado com
+  todos os 6 serviços travando ao mesmo tempo.
+- `restart: unless-stopped` nos serviços do pipeline (camada extra de self-healing).
+
+
 
 
 ## Como reproduzir

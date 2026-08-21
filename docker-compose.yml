@@ -129,6 +129,7 @@ services:
       context: .
       args:
         TARGET: cmd/orchestrator
+    restart: unless-stopped
     environment:
       KAFKA_BROKERS: kafka:9092
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
@@ -145,6 +146,7 @@ services:
       context: .
       args:
         TARGET: cmd/worker-payment
+    restart: unless-stopped
     environment:
       KAFKA_BROKERS: kafka:9092
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
@@ -161,6 +163,7 @@ services:
       context: .
       args:
         TARGET: cmd/worker-inventory
+    restart: unless-stopped
     environment:
       KAFKA_BROKERS: kafka:9092
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
@@ -177,6 +180,7 @@ services:
       context: .
       args:
         TARGET: cmd/worker-notification
+    restart: unless-stopped
     environment:
       KAFKA_BROKERS: kafka:9092
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
@@ -193,6 +197,7 @@ services:
       context: .
       args:
         TARGET: cmd/projector
+    restart: unless-stopped
     environment:
       KAFKA_BROKERS: kafka:9092
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
@@ -209,6 +214,7 @@ services:
       context: .
       args:
         TARGET: cmd/outbox-relay
+    restart: unless-stopped
     environment:
       KAFKA_BROKERS: kafka:9092
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
@@ -225,6 +231,7 @@ services:
       context: .
       args:
         TARGET: cmd/metrics-exporter
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
     depends_on:
@@ -260,6 +267,7 @@ services:
       context: .
       args:
         TARGET: cmd/order-status
+    restart: unless-stopped
     environment:
       KAFKA_BROKERS: kafka:9092
       OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318

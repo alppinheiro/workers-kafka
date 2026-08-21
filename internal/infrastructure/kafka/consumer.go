@@ -33,6 +33,12 @@ type ConsumerConfig struct {
 	// O Kafka distribui as partições entre elas; 1 (default) preserva o comportamento
 	// sequencial original. Em produção, Workers >= partições não traz ganho adicional.
 	Workers int
+	// CommitBatch define quantas mensagens acumular antes de commitar os offsets em lote
+	// (reduz os round-trips ao broker). Default: KAFKA_COMMIT_BATCH (50).
+	CommitBatch int
+	// CommitInterval é o intervalo máximo entre commits em lote.
+	// Default: KAFKA_COMMIT_INTERVAL (200ms).
+	CommitInterval time.Duration
 	// Topic é usado quando o consumer acompanha um único tópico.
 	Topic string
 	// Topics permite acompanhar múltiplos tópicos com um único reader, evitando goroutines adicionais.
@@ -44,10 +50,12 @@ type ConsumerConfig struct {
 
 // Consumer lê eventos de Kafka e os repassa, já desserializados, para um application.EventHandler.
 type Consumer struct {
-	cfg         ConsumerConfig
-	workers     int
-	dlq         *kafkago.Writer
-	serviceName string
+	cfg            ConsumerConfig
+	workers        int
+	commitBatch    int
+	commitInterval time.Duration
+	dlq            *kafkago.Writer
+	serviceName    string
 
 	mu      sync.Mutex
 	readers []*kafkago.Reader
@@ -59,15 +67,25 @@ func NewConsumer(cfg ConsumerConfig) *Consumer {
 	if workers < 1 {
 		workers = 1
 	}
+	commitBatch := cfg.CommitBatch
+	if commitBatch < 1 {
+		commitBatch = CommitBatchFromEnv()
+	}
+	commitInterval := cfg.CommitInterval
+	if commitInterval < 10*time.Millisecond {
+		commitInterval = CommitIntervalFromEnv()
+	}
 	serviceName := cfg.ServiceName
 	if serviceName == "" {
 		serviceName = "consumer"
 	}
 	return &Consumer{
-		cfg:         cfg,
-		workers:     workers,
-		dlq:         cfg.DLQWriter,
-		serviceName: serviceName,
+		cfg:            cfg,
+		workers:        workers,
+		commitBatch:    commitBatch,
+		commitInterval: commitInterval,
+		dlq:            cfg.DLQWriter,
+		serviceName:    serviceName,
 	}
 }
 
@@ -85,28 +103,83 @@ func (c *Consumer) Consume(ctx context.Context, handler application.EventHandler
 }
 
 // consumeWorker roda o loop de consumo com um Reader próprio do consumer group.
+// Os offsets são commitados em lote (por contagem ou intervalo) para reduzir os
+// round-trips ao broker; um commit que falha NUNCA derruba o serviço — a mensagem
+// não commitada é reprocessada na sequência (idempotência por event_id cobre).
 func (c *Consumer) consumeWorker(ctx context.Context, handler application.EventHandler) error {
-	reader := kafkago.NewReader(kafkago.ReaderConfig{
-		Brokers:     c.cfg.Brokers,
-		GroupID:     c.cfg.GroupID,
-		Topic:       c.cfg.Topic,
-		GroupTopics: c.cfg.Topics,
-	})
-	c.mu.Lock()
-	c.readers = append(c.readers, reader)
-	c.mu.Unlock()
+	newReader := func() *kafkago.Reader {
+		r := kafkago.NewReader(kafkago.ReaderConfig{
+			Brokers:     c.cfg.Brokers,
+			GroupID:     c.cfg.GroupID,
+			Topic:       c.cfg.Topic,
+			GroupTopics: c.cfg.Topics,
+		})
+		c.mu.Lock()
+		c.readers = append(c.readers, r)
+		c.mu.Unlock()
+		return r
+	}
+	reader := newReader()
 	defer func() { _ = reader.Close() }()
 
+	// Watchdog anti-stall: o kafka-go pode parar de fazer fetch ("reader travado") sem
+	// erro aparente, mantendo o membro vivo no grupo mas sem consumir. Ao detectar o
+	// stall, o watchdog CANCELA o contexto do FetchMessage (que está bloqueado), e o
+	// loop reconecta o reader (self-healing).
+	var fetchCtx context.Context
+	var fetchCancel context.CancelFunc
+	startFetch := func() {
+		fetchCtx, fetchCancel = context.WithCancel(ctx)
+	}
+	startFetch()
+
+	stallStop := make(chan struct{})
+	startWatchdog := func() {
+		go c.watchdogStall(reader, fetchCancel, stallStop)
+	}
+	startWatchdog()
+	defer close(stallStop)
+
+	batcher := newCommitBatcher(c.commitBatch, c.commitInterval)
+	var pendingCommits []kafkago.Message
+
+	// flush commita as mensagens acumuladas em um único round-trip ao broker.
+	flush := func() error {
+		if len(pendingCommits) == 0 {
+			return nil
+		}
+		err := reader.CommitMessages(ctx, pendingCommits...)
+		batcher.reset(time.Now())
+		pendingCommits = pendingCommits[:0]
+		return err
+	}
+
 	for {
-		msg, err := reader.FetchMessage(ctx)
+		msg, err := reader.FetchMessage(fetchCtx)
 		if err != nil {
+			if fetchCtx.Err() != nil {
+				// Stall detectado pelo watchdog: reconecta o reader (self-healing).
+				_ = flush()
+				log.Printf("component=consumer phase=reconnect service=%s", c.serviceName)
+				if closeErr := reader.Close(); closeErr != nil {
+					log.Printf("component=consumer phase=reconnect-close error=%v", closeErr)
+				}
+				close(stallStop)
+				reader = newReader()
+				stallStop = make(chan struct{})
+				startFetch()
+				startWatchdog()
+				continue
+			}
 			if shouldRetryFetch(err) {
 				log.Printf("component=consumer phase=retry-fetch delay=%s error=%v", consumerRetryDelay, err)
 				if waitErr := waitForRetry(ctx, consumerRetryDelay); waitErr != nil {
+					_ = flush()
 					return waitErr
 				}
 				continue
 			}
+			_ = flush()
 			return fmt.Errorf("erro ao ler mensagem: %w", err)
 		}
 
@@ -148,8 +221,18 @@ func (c *Consumer) consumeWorker(ctx context.Context, handler application.EventH
 		}
 		metrics.RecordProcessed(c.serviceName, string(event.EventType), time.Since(start))
 
-		if err := reader.CommitMessages(ctx, msg); err != nil {
-			return fmt.Errorf("erro ao confirmar mensagem: %w", err)
+		// Acumula o offset e commita em lote (por contagem ou intervalo).
+		pendingCommits = append(pendingCommits, msg)
+		batcher.add()
+		if batcher.shouldFlush(time.Now()) {
+			if err := flush(); err != nil {
+				// Não-fatal: a mensagem não commitada será reprocessada (idempotência).
+				if shouldRetryCommit(err) {
+					log.Printf("component=consumer phase=commit-retry error=%v", err)
+				} else {
+					log.Printf("component=consumer phase=commit-error error=%v", err)
+				}
+			}
 		}
 	}
 }
@@ -183,8 +266,10 @@ func (c *Consumer) moveToDLQ(ctx context.Context, reader *kafkago.Reader, msg ka
 	log.Printf("component=consumer phase=dlq topic=%s dlq_topic=%s offset=%d error=%v", msg.Topic, dlqTopic, msg.Offset, err)
 	metrics.RecordDLQ(msg.Topic)
 
+	// O commit da mensagem movida pode falhar transitoriamente (ex.: tópico recriado).
+	// Não é fatal: a mensagem será reprocessada (idempotência) e re-movida.
 	if commitErr := reader.CommitMessages(ctx, msg); commitErr != nil {
-		return false, fmt.Errorf("erro ao confirmar mensagem movida para a DLQ: %w", commitErr)
+		log.Printf("component=consumer phase=dlq-commit-error topic=%s error=%v", msg.Topic, commitErr)
 	}
 	return true, nil
 }
@@ -203,10 +288,94 @@ func (c *Consumer) tracer() trace.Tracer {
 	return otel.Tracer(c.serviceName)
 }
 
+// shouldRetryFetch indica se um erro de leitura/coordenação do Kafka é transitório e
+// deve ser re-tentado com backoff em vez de derrubar o serviço.
 func shouldRetryFetch(err error) bool {
-	return err == kafkago.GroupCoordinatorNotAvailable ||
-		err == kafkago.NotCoordinatorForGroup ||
-		err == kafkago.GroupLoadInProgress
+	return errors.Is(err, kafkago.UnknownTopicOrPartition) ||
+		errors.Is(err, kafkago.LeaderNotAvailable) ||
+		errors.Is(err, kafkago.NotLeaderForPartition) ||
+		errors.Is(err, kafkago.BrokerNotAvailable) ||
+		errors.Is(err, kafkago.GroupCoordinatorNotAvailable) ||
+		errors.Is(err, kafkago.NotCoordinatorForGroup) ||
+		errors.Is(err, kafkago.GroupLoadInProgress) ||
+		errors.Is(err, kafkago.RebalanceInProgress) ||
+		errors.Is(err, kafkago.UnknownMemberId)
+}
+
+// shouldRetryCommit classifica erros de commit como transitórios (mesmos erros de
+// coordenação do fetch). O commit falho NUNCA derruba o serviço: a mensagem não
+// commitada é reprocessada e a idempotência por event_id garante a consistência.
+func shouldRetryCommit(err error) bool {
+	return shouldRetryFetch(err)
+}
+
+const (
+	// stallCheckInterval é a frequência de checagem do watchdog anti-stall.
+	stallCheckInterval = 15 * time.Second
+	// stallTimeout é o tempo sem NENHUM fetch do Kafka que indica reader travado.
+	stallTimeout = 45 * time.Second
+)
+
+// watchdogStall monitora o reader e, ao detectar que ele parou de fazer fetch
+// (kafka-go pode "travar" sem erro aparente, mantendo o membro vivo no grupo mas sem
+// consumir), CANCELA o contexto do FetchMessage — desbloqueando o loop principal, que
+// reconecta o reader (self-healing).
+func (c *Consumer) watchdogStall(reader *kafkago.Reader, cancel context.CancelFunc, stop <-chan struct{}) {
+	ticker := time.NewTicker(stallCheckInterval)
+	defer ticker.Stop()
+
+	var lastFetches int64 = -1
+	lastProgress := time.Now()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			stats := reader.Stats()
+			now := time.Now()
+			if stats.Fetches > lastFetches {
+				lastFetches = stats.Fetches
+				lastProgress = now
+				continue
+			}
+			if stallDetected(stats.Fetches, lastFetches, now.Sub(lastProgress), stallTimeout) {
+				log.Printf("component=consumer phase=stall-detected service=%s fetches=%d lag=%d sem_progresso=%s",
+					c.serviceName, stats.Fetches, stats.Lag, now.Sub(lastProgress).Round(time.Second))
+				cancel()
+				lastProgress = now
+			}
+		}
+	}
+}
+
+// stallDetected indica que o contador de fetches não avançou (current <= last) por pelo
+// menos timeout — ou seja, o reader não está mais buscando mensagens do broker.
+func stallDetected(current, last int64, elapsed, timeout time.Duration) bool {
+	return current <= last && elapsed >= timeout
+}
+
+// commitBatcher decide quando commitar offsets em lote: por contagem acumulada ou por
+// intervalo desde o último commit. Extraído para teste unitário isolado.
+type commitBatcher struct {
+	batch    int
+	interval time.Duration
+	pending  int
+	last     time.Time
+}
+
+func newCommitBatcher(batch int, interval time.Duration) *commitBatcher {
+	return &commitBatcher{batch: batch, interval: interval, last: time.Now()}
+}
+
+func (b *commitBatcher) add() { b.pending++ }
+
+func (b *commitBatcher) shouldFlush(now time.Time) bool {
+	return b.pending >= b.batch || now.Sub(b.last) >= b.interval
+}
+
+func (b *commitBatcher) reset(now time.Time) {
+	b.pending = 0
+	b.last = now
 }
 
 func waitForRetry(ctx context.Context, delay time.Duration) error {
