@@ -9,6 +9,7 @@ import (
 
 	"workers-kafka/internal/application/orchestrator"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
+	"workers-kafka/internal/infrastructure/metrics"
 	"workers-kafka/internal/infrastructure/outbox"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 	"workers-kafka/internal/infrastructure/telemetry"
@@ -47,6 +48,8 @@ func main() {
 		log.Fatalf("orquestrador: falha ao inicializar telemetria: %v", err)
 	}
 	defer func() { _ = shutdown(ctx) }()
+
+	metrics.Serve(":9101")
 
 	pool, err := infrapostgres.Connect(ctx, infrapostgres.DatabaseURLFromEnv())
 	if err != nil {

@@ -103,6 +103,17 @@ RETURNING id, event_id, topic, key, payload, COALESCE(traceparent, '')`
 	return entries, rows.Err()
 }
 
+// CountPending retorna quantas linhas ainda não publicadas existem na outbox.
+func (r *OutboxRepository) CountPending(ctx context.Context) (int, error) {
+	const query = `SELECT count(*) FROM outbox WHERE published_at IS NULL`
+
+	var n int
+	if err := r.pool.QueryRow(ctx, query).Scan(&n); err != nil {
+		return 0, fmt.Errorf("erro ao contar outbox pendente: %w", err)
+	}
+	return n, nil
+}
+
 // MarkPublished marca um evento como publicado.
 func (r *OutboxRepository) MarkPublished(ctx context.Context, id int64) error {
 	const query = `UPDATE outbox SET published_at = now() WHERE id = $1`

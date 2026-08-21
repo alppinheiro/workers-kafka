@@ -655,6 +655,24 @@ O projeto é instrumentado com **OpenTelemetry**: cada evento consumido gera um 
 - Endpoint OTLP via env `OTEL_EXPORTER_OTLP_ENDPOINT` (no docker-compose é `jaeger:4318`; local, `localhost:4318`).
 - Se o Jaeger estiver desligado, os serviços continuam funcionando normalmente (os spans são descartados).
 
+### Métricas (Prometheus + Grafana)
+
+Cada serviço expõe métricas Prometheus em `/metrics` (portas 9101–9107) e o docker-compose
+sobe **Prometheus** (http://localhost:9090) e **Grafana** (http://localhost:3000, admin/admin).
+
+Dashboards:
+- **"Saga - Visão Geral"** (provisionado): eventos processados/s, latência p95, erros,
+  eventos na DLQ, sagas em fila por status, completadas/falhadas, outbox pendente e
+  publicação da outbox.
+
+Métricas principais:
+- `saga_events_{received,processed,failed,published}_total`
+- `saga_process_duration_seconds` (histograma — latência p50/p95/p99)
+- `saga_events_dlq_total`
+- `saga_outbox_pending` / `saga_outbox_published_total`
+- `saga_orders_pending{status}` / `saga_orders_completed_total` / `saga_orders_failed_total`
+  (expostas pelo `metrics-exporter`, que lê o Postgres a cada 10s)
+
 ## Teste de Carga e Como Escalar
 
 O projeto inclui um **load-generator** que publica eventos `ORDER_CREATED` em lote e mede a vazão de ingestão:

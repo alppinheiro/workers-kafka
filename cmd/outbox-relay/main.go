@@ -17,6 +17,7 @@ import (
 	kafkago "github.com/segmentio/kafka-go"
 
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
+	"workers-kafka/internal/infrastructure/metrics"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 	"workers-kafka/internal/infrastructure/telemetry"
 )
@@ -48,8 +49,10 @@ func main() {
 	}
 	defer pool.Close()
 
+	metrics.Serve(":9106")
+
 	outbox := infrapostgres.NewOutboxRepository(pool)
-	producer := infrakafka.NewProducer(brokers)
+	producer := infrakafka.NewProducer(brokers, "outbox-relay")
 	defer func() { _ = producer.Close() }()
 
 	log.Println("outbox-relay: aguardando eventos na outbox")
@@ -71,6 +74,11 @@ func relayOnce(ctx context.Context, outbox *infrapostgres.OutboxRepository, prod
 	if err != nil {
 		return err
 	}
+
+	if pending, err := outbox.CountPending(ctx); err == nil {
+		metrics.SetOutboxPending(pending)
+	}
+
 	if len(entries) == 0 {
 		return nil
 	}
@@ -111,6 +119,7 @@ func relayOnce(ctx context.Context, outbox *infrapostgres.OutboxRepository, prod
 		if err := outbox.MarkPublished(ctx, entry.ID); err != nil {
 			return fmt.Errorf("erro ao marcar evento %s como publicado: %w", entry.EventID, err)
 		}
+		metrics.RecordOutboxPublished()
 		log.Printf("outbox-relay: publicado event_id=%s topic=%s key=%s", entry.EventID, entry.Topic, entry.Key)
 	}
 	return nil

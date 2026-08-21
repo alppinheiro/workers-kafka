@@ -10,6 +10,7 @@ import (
 	"workers-kafka/internal/application/worker"
 	"workers-kafka/internal/infrastructure/external"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
+	"workers-kafka/internal/infrastructure/metrics"
 	"workers-kafka/internal/infrastructure/outbox"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 	"workers-kafka/internal/infrastructure/telemetry"
@@ -43,6 +44,8 @@ func main() {
 		log.Fatalf("worker de estoque: falha ao inicializar telemetria: %v", err)
 	}
 	defer func() { _ = shutdown(ctx) }()
+
+	metrics.Serve(":9103")
 
 	pool, err := infrapostgres.Connect(ctx, infrapostgres.DatabaseURLFromEnv())
 	if err != nil {

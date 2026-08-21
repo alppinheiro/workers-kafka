@@ -367,6 +367,7 @@ Este fluxo já está consolidado no topo do documento e segue a sequência `PEND
 - Teste de carga (2000 pedidos): ingestão ~47.000 eventos/s; `outbox-relay` otimizado para publicar em lote (`PublishBatch`). O gargalo restante são os consumers single-threaded → Fase 5 (concorrência com goroutines e mais partições).
 - Fase 5 (escalabilidade de produção) concluída conforme `PHASE_5_PLAN.md` e `BENCHMARK.md`: 4 partições por tópico, `SAGA_WORKERS` (Readers concorrentes no mesmo consumer group), escala horizontal via `--scale` (consumer groups), outbox-relay com `FOR UPDATE SKIP LOCKED` (claims) e autoscaler por lag (análogo local ao KEDA/HPA). Benchmark: 3.000 pedidos/60 s com 1 réplica deixam 2.012 na fila; com 3 réplicas + 2 relays, 164 (~12×).
 - CI/CD (planejado): GitHub Actions com `make check` + testes de integração (services postgres/kafka) + push de imagem para ECR; deploy futuro em EKS via Helm (publicação AWS: EKS/ECS, MSK, RDS).
+- Fase 6 (métricas) concluída conforme `PHASE_6_PLAN.md`: métricas Prometheus expostas por serviço (`/metrics` nas portas 9101–9107), `metrics-exporter` (gauges do Postgres: sagas por status, completadas/falhadas), Prometheus + Grafana no docker-compose com dashboard provisionado "Saga - Visão Geral" (8 painéis).
 
 ## Observação
 

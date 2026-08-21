@@ -18,6 +18,7 @@ import (
 
 	"workers-kafka/internal/application"
 	"workers-kafka/internal/domain"
+	"workers-kafka/internal/infrastructure/metrics"
 )
 
 const consumerRetryDelay = 2 * time.Second
@@ -129,10 +130,13 @@ func (c *Consumer) consumeWorker(ctx context.Context, handler application.EventH
 				attribute.String("event_id", event.EventID),
 			))
 
+		metrics.RecordReceived(c.serviceName, string(event.EventType))
+		start := time.Now()
 		err = handler(handlerCtx, event)
 		span.End()
 
 		if err != nil {
+			metrics.RecordError(c.serviceName, string(event.EventType))
 			moved, moveErr := c.moveToDLQ(handlerCtx, reader, msg, fmt.Errorf("erro ao processar evento %s: %w", event.EventID, err))
 			if moveErr != nil {
 				return moveErr
@@ -142,6 +146,7 @@ func (c *Consumer) consumeWorker(ctx context.Context, handler application.EventH
 			}
 			return err
 		}
+		metrics.RecordProcessed(c.serviceName, string(event.EventType), time.Since(start))
 
 		if err := reader.CommitMessages(ctx, msg); err != nil {
 			return fmt.Errorf("erro ao confirmar mensagem: %w", err)
@@ -176,6 +181,7 @@ func (c *Consumer) moveToDLQ(ctx context.Context, reader *kafkago.Reader, msg ka
 	}
 
 	log.Printf("component=consumer phase=dlq topic=%s dlq_topic=%s offset=%d error=%v", msg.Topic, dlqTopic, msg.Offset, err)
+	metrics.RecordDLQ(msg.Topic)
 
 	if commitErr := reader.CommitMessages(ctx, msg); commitErr != nil {
 		return false, fmt.Errorf("erro ao confirmar mensagem movida para a DLQ: %w", commitErr)

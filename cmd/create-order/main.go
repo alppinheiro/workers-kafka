@@ -24,7 +24,7 @@ func main() {
 
 	brokers := infrakafka.BrokersFromEnv()
 
-	producer := infrakafka.NewProducer(brokers)
+	producer := infrakafka.NewProducer(brokers, "create-order")
 	defer func() { _ = producer.Close() }()
 
 	shutdown, err := telemetry.Init("create-order")

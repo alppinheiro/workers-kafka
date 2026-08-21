@@ -1,6 +1,6 @@
 COMPOSE ?= docker-compose
 ORDER_ID ?= order-001
-SERVICES = kafka kafka-init postgres migrations postgres-read migrations-read jaeger orchestrator worker-payment worker-inventory worker-notification order-status projector outbox-relay
+SERVICES = kafka kafka-init postgres migrations postgres-read migrations-read jaeger prometheus grafana orchestrator worker-payment worker-inventory worker-notification order-status projector outbox-relay metrics-exporter
 
 .PHONY: help fmt build vet test lint check up down logs ps create-order inspect rebuild
 
@@ -64,4 +64,4 @@ autoscale:
 	KAFKA_BROKERS=localhost:9094 go run ./cmd/autoscaler
 
 rebuild:
-	$(COMPOSE) build orchestrator worker-payment worker-inventory worker-notification order-status projector outbox-relay create-order
+	$(COMPOSE) build orchestrator worker-payment worker-inventory worker-notification order-status projector outbox-relay metrics-exporter create-order

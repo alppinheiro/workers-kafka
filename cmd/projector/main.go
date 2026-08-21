@@ -9,6 +9,7 @@ import (
 
 	"workers-kafka/internal/application/projector"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
+	"workers-kafka/internal/infrastructure/metrics"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 	infrapostgresread "workers-kafka/internal/infrastructure/persistence/postgres_read"
 	"workers-kafka/internal/infrastructure/telemetry"
@@ -47,6 +48,8 @@ func main() {
 		log.Fatalf("projector: falha ao inicializar telemetria: %v", err)
 	}
 	defer func() { _ = shutdown(ctx) }()
+
+	metrics.Serve(":9105")
 
 	pool, err := infrapostgres.Connect(ctx, infrapostgresread.DatabaseURLFromEnv())
 	if err != nil {

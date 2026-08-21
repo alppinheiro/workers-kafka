@@ -220,6 +220,41 @@ services:
       migrations:
         condition: service_completed_successfully
 
+  metrics-exporter:
+    build:
+      context: .
+      args:
+        TARGET: cmd/metrics-exporter
+    environment:
+      DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: workers-kafka-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: workers-kafka-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
   order-status:
     build:
       context: .

@@ -14,21 +14,25 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 
 	"workers-kafka/internal/domain"
+	"workers-kafka/internal/infrastructure/metrics"
 )
 
 // Producer publica eventos de domínio em Kafka, serializados em JSON, usando order_id como chave de particionamento.
 type Producer struct {
-	writer *kafkago.Writer
+	writer      *kafkago.Writer
+	serviceName string
 }
 
-// NewProducer cria um producer conectado aos brokers informados.
-func NewProducer(brokers []string) *Producer {
+// NewProducer cria um producer conectado aos brokers informados, identificando o serviço
+// nas métricas de publicação.
+func NewProducer(brokers []string, serviceName string) *Producer {
 	return &Producer{
 		writer: &kafkago.Writer{
 			Addr:         kafkago.TCP(brokers...),
 			Balancer:     &kafkago.Hash{},
 			RequiredAcks: kafkago.RequireOne,
 		},
+		serviceName: serviceName,
 	}
 }
 
@@ -83,6 +87,7 @@ func (p *Producer) Publish(ctx context.Context, event domain.Event) error {
 		)
 		return err
 	}
+	metrics.RecordPublished(p.serviceName, topic)
 
 	log.Printf("component=producer phase=published topic=%s event_id=%s order_id=%s saga_id=%s type=%s status_previous=%s status_current=%s payload_bytes=%d duration=%s",
 		topic,
@@ -124,7 +129,13 @@ func (p *Producer) PublishBatch(ctx context.Context, msgs []kafkago.Message) err
 	if len(msgs) == 0 {
 		return nil
 	}
-	return p.writer.WriteMessages(ctx, msgs...)
+	if err := p.writer.WriteMessages(ctx, msgs...); err != nil {
+		return err
+	}
+	for _, m := range msgs {
+		metrics.RecordPublished(p.serviceName, m.Topic)
+	}
+	return nil
 }
 
 // TraceHeadersFrom serializa o contexto de trace corrente (W3C traceparent) nos headers
