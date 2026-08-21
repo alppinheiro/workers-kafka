@@ -86,6 +86,10 @@ Alterações em `cmd/outbox-relay/main.go` + `outbox_repository.go`:
 **Validação:** `make integration` verde + benchmark de throughput (método do `BENCHMARK.md`):
 esperado ≥ **300 ev/s** com 1 relay.
 
+**✅ Resultado (21/08/2026):** relay passa a **~485 ev/s** (lote 500/ciclo ~1s) vs ~50 ev/s antes —
+**~9,7×**. No fluxo completo o relay deixou de ser o gargalo; o novo limitador é o consumo
+(orquestrador em bursts intermitentes) → **Etapa 7.2**.
+
 ### Etapa 7.2 — Consumers: batch de commit (impacto: 2–4× acima de 400 ev/s)
 
 - `ReaderConfig` com `CommitInterval` + commit em lote após N mensagens (ex.: 50), mantendo

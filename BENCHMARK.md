@@ -101,6 +101,21 @@ Teste com 10.000 pedidos e `AUTOSCALE_HIGH_LAG=200`:
   Hipóteses a investigar: cadência do `outbox-relay` (lote de 100 a cada ~2 s), latência do Kafka
   1-broker pós-reinício e concorrência no Colima (2 CPUs / 4 GB).
 
+## Benchmark — Etapa 7.1 aplicada (outbox-relay otimizado)
+
+| Métrica | Antes (7.0) | Depois (7.1) | Ganho |
+|---|---|---|---|
+| Throughput do relay (outbox → Kafka) | **~50 ev/s** (lote 100 / ciclo 2 s / log por evento) | **~485 ev/s** (lote 500 / ciclo ~1 s / log agregado) | **~9,7×** |
+| Drenagem de 5.000 eventos na outbox | ~100 s (estimado) | **~10 s** (medido) | ~10× |
+
+**Como medido:** 5.000 linhas inseridas diretamente na outbox → relay publica em lotes de 500
+(`ciclo publicados=500 duracao=1.03s` → 485 ev/s) → outbox zerada em ~10 s.
+
+**Resultado no fluxo completo (A11):** o relay passou a ser limitado pela **entrada** (orquestrador
+gera ~60 eventos/s), não mais por ele mesmo. O novo gargalo é o consumo (orquestrador lendo em
+bursts intermitentes) → **Etapa 7.2 (commit em lote) e investigar `kafka-go GroupTopics`**.
+
+
 ## Como reproduzir
 
 ```bash

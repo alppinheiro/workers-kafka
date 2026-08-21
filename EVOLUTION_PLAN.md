@@ -110,11 +110,11 @@ A evolução foi dividida em 5 fases sequenciais. A ordem é crítica: não otim
 **Objetivo:** eliminar o gargalo do `outbox-relay` (benchmark revelou teto de ~48 ev/s) e garantir
 fluxo contínuo + rastreabilidade total. Detalhes em `PHASE_7_PLAN.md`.
 
-- [ ] **7.1 Relay sem gargalo**: log agregado por ciclo (não por evento), loop contínuo com backoff
+- [x] **7.1 Relay sem gargalo**: log agregado por ciclo (não por evento), loop contínuo com backoff
   (sem timer fixo de 1s), `OUTBOX_BATCH_SIZE` (default 500), `MarkPublished` em lote (`ANY($1)`),
-  retenção/purga da outbox. *Impacto esperado: ~10× (≥300 ev/s).*
+  retenção/purga da outbox. *✅ Medido: ~50 → **~485 ev/s** (~9,7×).*
 - [ ] **7.2 Commit em lote nos consumers** (`CommitInterval`/lote de N): remove o 2º gargalo
-  (1 round-trip de commit por evento).
+  (1 round-trip de commit por evento; orquestrador consome em bursts intermitentes).
 - [ ] **7.3 Rastreabilidade**: índice de correlação em `saga_events(order_id, created_at)`,
   lag/idade da outbox no dashboard, alerta de DLQ, journal como "trace de negócio".
 - [ ] **7.4 Transação atômica única** (estado + journal + outbox em 1 tx) — elimina janelas residuais.

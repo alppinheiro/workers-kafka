@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -23,14 +24,24 @@ import (
 )
 
 const (
-	pollInterval = time.Second
-	batchSize    = 100
-	claimTimeout = 60 * time.Second
+	defaultBatchSize = 500
+	defaultBackoff   = 250 * time.Millisecond
+	claimTimeout     = 60 * time.Second
+	purgeInterval    = time.Hour
+	purgeAfter       = 7 * 24 * time.Hour
+	countInterval    = 10 * time.Second
 )
 
 // main roda o relé da outbox: lê eventos não publicados da tabela outbox, publica no
 // Kafka e marca como publicado. É o componente que garante a entrega dos eventos
 // decididos pelos orquestrador/workers, mesmo que o processo que os gerou tenha morrido.
+//
+// O loop é contínuo: quando há backlog, o próximo lote é processado imediatamente
+// (sem o teto de "1 ciclo por segundo" do timer fixo original); com a outbox vazia,
+// aguarda um backoff curto. Configurável via ambiente:
+//
+//	OUTBOX_BATCH_SIZE    (default 500)
+//	OUTBOX_POLL_INTERVAL (default 250ms)
 func main() {
 	brokers := infrakafka.BrokersFromEnv()
 
@@ -51,36 +62,85 @@ func main() {
 
 	metrics.Serve(":9106")
 
+	batchSize := envInt("OUTBOX_BATCH_SIZE", defaultBatchSize)
+	if batchSize < 1 {
+		batchSize = defaultBatchSize
+	}
+	pollBackoff := envDuration("OUTBOX_POLL_INTERVAL", defaultBackoff)
+	if pollBackoff < 10*time.Millisecond {
+		pollBackoff = defaultBackoff
+	}
+
 	outbox := infrapostgres.NewOutboxRepository(pool)
 	producer := infrakafka.NewProducer(brokers, "outbox-relay")
 	defer func() { _ = producer.Close() }()
 
-	log.Println("outbox-relay: aguardando eventos na outbox")
+	// Métrica de backlog atualizada de forma esparsa (evita um SELECT count por ciclo).
+	go func() {
+		ticker := time.NewTicker(countInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if pending, err := outbox.CountPending(ctx); err == nil {
+					metrics.SetOutboxPending(pending)
+				}
+			}
+		}
+	}()
+
+	// Retenção: purga eventos publicados há mais de purgeAfter (a outbox cresceria sem limite).
+	go func() {
+		ticker := time.NewTicker(purgeInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				removed, err := outbox.PurgePublished(ctx, purgeAfter)
+				if err != nil {
+					log.Printf("outbox-relay: erro na purga: %v", err)
+					continue
+				}
+				if removed > 0 {
+					log.Printf("outbox-relay: purga removida=%d older_than=%s", removed, purgeAfter)
+				}
+			}
+		}
+	}()
+
+	log.Printf("outbox-relay: iniciado batch_size=%d poll_backoff=%s", batchSize, pollBackoff)
 	for {
-		select {
-		case <-ctx.Done():
-			log.Println("outbox-relay: encerrado")
-			return
-		case <-time.After(pollInterval):
-			if err := relayOnce(ctx, outbox, producer); err != nil {
-				log.Printf("outbox-relay: erro no ciclo: %v", err)
+		n, err := relayOnce(ctx, outbox, producer, batchSize)
+		if err != nil {
+			log.Printf("outbox-relay: erro no ciclo: %v", err)
+			if !sleepCtx(ctx, pollBackoff) {
+				return
+			}
+			continue
+		}
+		// Lote cheio → processa o próximo imediatamente (alta vazão).
+		// Lote vazio → backoff curto (sem busy-loop).
+		if n == 0 {
+			if !sleepCtx(ctx, pollBackoff) {
+				return
 			}
 		}
 	}
 }
 
-func relayOnce(ctx context.Context, outbox *infrapostgres.OutboxRepository, producer *infrakafka.Producer) error {
+// relayOnce executa um ciclo: claim → publish → mark em lote. Retorna o nº de eventos
+// publicados (0 quando a outbox está vazia, permitindo ao chamador aplicar backoff).
+func relayOnce(ctx context.Context, outbox *infrapostgres.OutboxRepository, producer *infrakafka.Producer, batchSize int) (int, error) {
 	entries, err := outbox.ClaimPending(ctx, batchSize, claimTimeout)
 	if err != nil {
-		return err
+		return 0, err
 	}
-
-	if pending, err := outbox.CountPending(ctx); err == nil {
-		metrics.SetOutboxPending(pending)
-	}
-
 	if len(entries) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	// Monta o lote, reconstruindo o trace do produtor original (traceparent salvo na
@@ -108,19 +168,69 @@ func relayOnce(ctx context.Context, outbox *infrapostgres.OutboxRepository, prod
 		})
 	}
 
+	started := time.Now()
 	if err := producer.PublishBatch(ctx, msgs); err != nil {
-		return fmt.Errorf("erro ao publicar lote da outbox: %w", err)
+		endSpans(spans)
+		return 0, fmt.Errorf("erro ao publicar lote da outbox: %w", err)
 	}
+	endSpans(spans)
+
+	// Marca o lote como publicado em 1 round-trip (não 1 UPDATE por evento).
+	ids := make([]int64, len(entries))
+	for i, entry := range entries {
+		ids[i] = entry.ID
+	}
+	if err := outbox.MarkPublishedBatch(ctx, ids); err != nil {
+		return 0, fmt.Errorf("erro ao marcar lote da outbox como publicado: %w", err)
+	}
+	for range entries {
+		metrics.RecordOutboxPublished()
+	}
+
+	log.Printf("outbox-relay: ciclo publicados=%d duracao=%s", len(entries), time.Since(started))
+	return len(entries), nil
+}
+
+func endSpans(spans []trace.Span) {
 	for _, span := range spans {
 		span.End()
 	}
+}
 
-	for _, entry := range entries {
-		if err := outbox.MarkPublished(ctx, entry.ID); err != nil {
-			return fmt.Errorf("erro ao marcar evento %s como publicado: %w", entry.EventID, err)
-		}
-		metrics.RecordOutboxPublished()
-		log.Printf("outbox-relay: publicado event_id=%s topic=%s key=%s", entry.EventID, entry.Topic, entry.Key)
+// sleepCtx dorme por d ou retorna false quando o contexto é cancelado.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
 	}
-	return nil
+}
+
+// envInt lê um inteiro do ambiente com default.
+func envInt(name string, def int) int {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		log.Printf("outbox-relay: %s inválido (%q), usando default %d", name, raw, def)
+		return def
+	}
+	return n
+}
+
+// envDuration lê uma duração do ambiente com default.
+func envDuration(name string, def time.Duration) time.Duration {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return def
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		log.Printf("outbox-relay: %s inválido (%q), usando default %s", name, raw, def)
+		return def
+	}
+	return d
 }

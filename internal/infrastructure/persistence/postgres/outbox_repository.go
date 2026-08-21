@@ -123,3 +123,29 @@ func (r *OutboxRepository) MarkPublished(ctx context.Context, id int64) error {
 	}
 	return nil
 }
+
+// MarkPublishedBatch marca um lote de eventos como publicado em uma única instrução
+// (1 round-trip), em vez de um UPDATE por evento. Usado pelo outbox-relay em alta vazão.
+func (r *OutboxRepository) MarkPublishedBatch(ctx context.Context, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	const query = `UPDATE outbox SET published_at = now() WHERE id = ANY($1)`
+
+	if _, err := r.pool.Exec(ctx, query, ids); err != nil {
+		return fmt.Errorf("erro ao marcar lote da outbox como publicado: %w", err)
+	}
+	return nil
+}
+
+// PurgePublished remove eventos já publicados há mais de olderThan (retenção da outbox).
+// Sem isso a tabela cresce indefinidamente, degradando consultas e o CountPending.
+func (r *OutboxRepository) PurgePublished(ctx context.Context, olderThan time.Duration) (int64, error) {
+	const query = `DELETE FROM outbox WHERE published_at IS NOT NULL AND published_at < now() - $1::interval`
+
+	tag, err := r.pool.Exec(ctx, query, olderThan.String())
+	if err != nil {
+		return 0, fmt.Errorf("erro ao purgar outbox publicada: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
