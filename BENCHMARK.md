@@ -115,6 +115,22 @@ Teste com 10.000 pedidos e `AUTOSCALE_HIGH_LAG=200`:
 gera ~60 eventos/s), não mais por ele mesmo. O novo gargalo é o consumo (orquestrador lendo em
 bursts intermitentes) → **Etapa 7.2 (commit em lote) e investigar `kafka-go GroupTopics`**.
 
+> ⚠️ O A11 foi medido com **1 partição por tópico** (regressão do laboratório: o auto-create do
+> broker criou os tópicos com 1 partição ao recriá-los). Invalida as taxas desse cenário.
+
+## Benchmark — A12 (7.1 + 4 partições corretas)
+
+| Métrica | A6 (7.0, relay antigo) | A12 (7.1 + 4 partições) |
+|---|---|---|
+| Orquestrador | 48,6 ev/s | **195,3 ev/s** |
+| outbox-relay (pub.) | 49,2 ev/s | **235,1 ev/s** |
+| Sagas COMPLETED em ~69 s | 0 | **2.291** (+709 FAILED = 100%) |
+
+- **O fluxo completo drena 3.000 pedidos em ~69 s** com o relay otimizado e 4 partições.
+- Novo gargalo: **consumo** (orquestrador 195 ev/s vs relay 235 ev/s) → commit por mensagem
+  (~1 round-trip/evento) é o limite da Etapa 7.2.
+
+
 
 ## Como reproduzir
 

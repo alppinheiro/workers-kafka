@@ -90,42 +90,76 @@ esperado ≥ **300 ev/s** com 1 relay.
 **~9,7×**. No fluxo completo o relay deixou de ser o gargalo; o novo limitador é o consumo
 (orquestrador em bursts intermitentes) → **Etapa 7.2**.
 
-### Etapa 7.2 — Consumers: batch de commit (impacto: 2–4× acima de 400 ev/s)
+### Etapa 7.2 — Consumers: commit em lote + resiliência (impacto: 195 → 300+ ev/s)
 
-- `ReaderConfig` com `CommitInterval` + commit em lote após N mensagens (ex.: 50), mantendo
-  ordem por partição e idempotência (reprocessamento de até 50 é inofensivo).
-- `SAGA_WORKERS` continua sendo o paralelismo intra-instância; o commit em lote reduz os
-  round-trips ao broker.
+**Contexto (A12):** com 4 partições + relay otimizado, o orquestrador atingiu **195 ev/s** e é o
+novo gargalo — limitado pelo **commit por mensagem** (1 round-trip `CommitMessages` por evento).
+O relay já publica 235 ev/s.
 
-**Validação:** benchmark A/B (`SAGA_WORKERS=1` vs `3`) agora COM relay otimizado.
+**Alterações em `internal/infrastructure/kafka/consumer.go`:**
+
+1. **Commit em lote** (mantém ordem por partição + idempotência):
+   - Acumular offsets por partição durante o processamento.
+   - A cada `N` mensagens (env `KAFKA_COMMIT_BATCH`, default 50) ou a cada `200 ms`, chamar
+     `reader.CommitOffsets` com os offsets acumulados.
+   - No shutdown/erro, commitar o pendente.
+   - Semântica: at-least-once; reprocessar até `N` eventos é inofensivo (idempotência por `event_id`).
+
+2. **Resiliência a erros de coordenação do Kafka** (não derrubar o serviço):
+   - Adicionar `UnknownTopicOrPartition`, `LeaderNotAvailable`, `BrokerNotAvailable` etc. ao
+     `shouldRetryFetch` — hoje o serviço morre (`exit 1`) se um tópico é recriado.
+   - Retry com backoff (2s → 30s) em vez de encerrar.
+
+3. **Configuração**: `KAFKA_COMMIT_BATCH` (default 50), `KAFKA_COMMIT_INTERVAL` (default 200ms).
+
+**Validação:** benchmark A (orquestrador ≥ 300 ev/s); `make check` + Testcontainers verdes;
+teste do acumulador de offsets.
 
 ### Etapa 7.3 — Rastreabilidade completa (produção)
 
-- **Índice de correlação**: `saga_events(order_id, created_at)` + `event_id` — consulta de
-  auditoria por pedido sem scan.
-- **Métricas por etapa**: já existe `saga_events_processed_total{service,event_type}`; adicionar
-  **lag por consumer group** e **idade da outbox** no dashboard (rascunho no grafana).
-- **DLQ alerting**: alerta quando `saga_events_dlq_total` cresce (Grafana Alerting / Prometheus
-  `rules.yml`).
-- **Journal como fonte de verdade**: documentar o fluxo de auditoria (`saga_events`) como o
-  "trace de negócio" (complementar ao trace técnico no Jaeger).
+- **Índice de correlação**: `saga_events(order_id, created_at)` + `saga_events(event_id)` —
+  consulta de auditoria por pedido sem full scan (hoje não há índice em `order_id`).
+- **Métricas**: `saga_consumer_lag` (lag por grupo via admin do Kafka, exposto pelo
+  metrics-exporter), `saga_outbox_max_age_seconds`.
+- **Alerta DLQ**: `prometheus/rules.yml` — `increase(saga_events_dlq_total[5m]) > 0` →
+  alerta `DLQGrowth` (Grafana Alerting).
+- **Correção do gauge stale do metrics-exporter**: zerar labels de status que não existem mais
+  (`ordersPending.Reset()` antes de `Set`) para o painel refletir o estado real.
+- **Journal = trace de negócio**: documentar o fluxo de auditoria (`saga_events`) no README
+  (complemento ao trace técnico do Jaeger).
 
-### Etapa 7.4 — Pendência estrutural (transação atômica)
+**Validação:** consulta de auditoria < 50 ms; alerta DLQ funcional (teste de disparo).
 
-- Unificar estado + journal + outbox em **uma única transação** por handler (orquestrador e
-  workers). Elimina as janelas residuais (hoje cobertas por idempotência).
+### Etapa 7.4 — Transação atômica única (consistência)
+
+- Unificar `Save` (estado) + `Append` (journal) + `Append` (outbox) em **uma transação** por
+  handler (orquestrador e workers) — elimina as janelas residuais cobertas hoje por idempotência.
+- `pgx.Tx` + repositórios transacionais (`SagaTxRepository`, `EventLogTxRepository`,
+  `OutboxTxRepository`).
+- **Validação:** testes de consistência (nenhum evento sem estado; outbox sempre acompanhada);
+  Testcontainers verdes.
+
+### Etapa 7.5 — Validação final de produção (DoD)
+
+- Benchmark completo A/B/C com tudo otimizado (registrar no `BENCHMARK.md`).
+- **Testes de resiliência**: restart de cada serviço no meio do fluxo (a saga continua de onde
+  parou); tópico recriado (o consumer não morre); relay duplicado (SKIP LOCKED sem duplicar);
+  worker caído (compensação correta).
+- `make check` + `make integration` verdes.
+- Runbook operacional no README (subir stack, monitorar, recuperar DLQ).
 
 ## 4. Ordem de execução e critérios de pronto
 
 | Etapa | Risco | Dependência | DoD |
 |---|---|---|---|
-| 7.1 relay | baixo (código isolado) | — | `make integration` + ≥300 ev/s com 1 relay |
-| 7.2 commit batch | médio (ordem/idempotência) | 7.1 | benchmark A/B verde; DLQ zero no teste |
-| 7.3 rastreabilidade | baixo | 7.1 | consulta de auditoria < 50 ms; alerta DLQ funcional |
-| 7.4 transação atômica | alto (regressão) | 7.2 | `make check` + Testcontainers verdes |
+| 7.1 relay | baixo | — | ✅ **feito** — relay ~485 ev/s |
+| **7.2 commit em lote + resiliência** | médio | 7.1 | orquestrador ≥ 300 ev/s; sobrevive a tópico recriado |
+| 7.3 rastreabilidade | baixo | 7.1 | auditoria < 50 ms; alerta DLQ; gauge correto |
+| 7.4 transação atômica | alto | 7.2 | consistência; Testcontainers verdes |
+| 7.5 validação produção | médio | 7.2–7.4 | benchmark A/B/C + resiliência + runbook |
 
-**Recomendação:** executar 7.1 primeiro (maior impacto, menor risco) e re-medir com o método do
-`BENCHMARK.md` — o mesmo método que revelou o gargalo, agora para provar a correção.
+**Recomendação:** implementar **7.2** agora (maior ganho de performance restante + resiliência),
+depois **7.3** (rastreabilidade — requisito de produção), **7.4** (consistência) e **7.5** (validação).
 
    única, evitando as anomalias de concorrência do padrão.
 
