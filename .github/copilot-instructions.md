@@ -4,15 +4,22 @@
 Projeto de estudo em Go para simular o ciclo de vida de um pedido usando **Saga Orquestrada** e **workers assíncronos via Kafka**.
 
 ## 2. Escopo Atual e Restrições (Fase Atual)
-- **Incluso:** Arquitetura central, contratos, simuladores de APIs externas, testes unitários (Fase 1) e persistência do estado da saga + rastreabilidade com PostgreSQL (Fase 2 em execução — ver `PHASE_2_PLAN.md`).
-  - Banco de escrita `postgres` (tabelas `sagas` e `saga_events`, com payloads request/response dos gateways)
-  - Banco de leitura `postgres-read` (read model `order_views` projetado via Kafka pelo serviço `projector`)
+- **Incluso (Fases 1–5 concluídas — ver `PHASE_*_PLAN.md` e `BENCHMARK.md`):**
+  - Testes unitários e de integração (Fase 1 + integração contra Postgres real)
+  - Persistência + rastreabilidade: `sagas`, `saga_events` (journal com payloads request/response)
+  - Read model `order_views` (banco de leitura) projetado via Kafka pelo serviço `projector`
+  - Outbox Pattern (`outbox` + `outbox-relay` com `FOR UPDATE SKIP LOCKED`), DLQ por tópico e
+    idempotência por `event_id` (Fase 3)
+  - Observabilidade distribuída: OpenTelemetry + Jaeger, propagação W3C `traceparent` via
+    Kafka headers e outbox (Fase 4)
+  - Escalabilidade: 4 partições, `SAGA_WORKERS` (goroutines no consumer), consumer groups
+    multi-instância, autoscaler por lag (análogo ao KEDA/HPA) (Fase 5)
 - **Fora de Escopo Nesta Fase:**
-  - Observabilidade e métricas
   - API REST de consulta de pedido
-  - Outbox Pattern, DLQ e idempotência completa (Fase 3)
+  - Métricas Prometheus/Grafana (Fase 6 proposta)
   - Testes de integração com testcontainers (pendência da Fase 1)
-  - Concorrência explícita / Goroutines (adiadas para fase de comparação de desempenho)
+  - Escala horizontal real em Kubernetes (KEDA/HPA) — cloud AWS planejada
+  - Transação atômica única (estado + journal + outbox)
 
 ## 3. Estrutura Obrigatória de Pacotes
 ```text

@@ -309,6 +309,9 @@ cmd/
   create-order/           publica o evento inicial do pedido
   orchestrator/           coordena a saga (estado persistido em PostgreSQL)
   projector/              projeta os eventos do Kafka no read model (banco de leitura)
+  outbox-relay/           publica eventos da outbox no Kafka (lote + claims)
+  autoscaler/             escala réplicas pelo lag do consumer group (análogo ao KEDA)
+  load-generator/         publica pedidos em lote para testes de carga
   order-status/           consome eventos finais para auditoria
   worker-inventory/       processa estoque
   worker-notification/    processa notificação
@@ -322,16 +325,19 @@ internal/
   domain/                 entidades, eventos, saga e status
   infrastructure/
     external/             simuladores das APIs externas
-    kafka/                producer, consumer, tópicos e configuração
+    kafka/                producer, consumer, tópicos, DLQ e configuração
+    outbox/               OutboxPublisher (EventPublisher para a tabela outbox)
+    telemetry/            OpenTelemetry (OTLP + propagação W3C traceparent)
     persistence/
-      postgres/           banco de escrita: SagaRepository, EventLogRepository
+      postgres/           banco de escrita: SagaRepository, EventLogRepository, OutboxRepository
       postgres_read/      banco de leitura: OrderViewRepository (read model)
   interfaces/             adapters e logging
 
 migrations/               SQL do banco de escrita (golang-migrate)
 migrations-read/          SQL do banco de leitura (golang-migrate)
+PHASE_*_PLAN.md           planos por fase (2–5) e BENCHMARK.md
 .vscode/                  debug ponta a ponta no VS Code
-docker-compose.yml        stack local com Kafka + Postgres (escrita/leitura)
+docker-compose.yml        stack local com Kafka + Postgres (escrita/leitura) + Jaeger
 Dockerfile                build parametrizado dos binários Go
 Makefile                  atalhos de execução e validação
 ```
@@ -663,33 +669,16 @@ KAFKA_BROKERS=localhost:9094 go run ./cmd/load-generator -count 2000 -batch 500 
 | Métrica | Valor |
 |---|---|
 | **Ingestão** (lote via Kafka) | ~47.000 eventos/s |
-| **Processamento** (consumers single-threaded) | dezenas de eventos/s por consumer |
+| **Processamento** (baseline da Fase 4: consumers single-threaded) | dezenas de eventos/s por consumer |
 | Backlog inicial em `orders.created` com 2000 pedidos | lag de ~1.278 → zerado |
 | Gargalo principal identificado | `outbox-relay` publicava 1 mensagem/round-trip (~1 evento/s) |
+
+> Os resultados acima são o **baseline da Fase 4**. A **Fase 5** implementou concorrência e
+> escala (partições, `SAGA_WORKERS`, multi-instância, autoscaler) — ver `BENCHMARK.md`.
 
 ### O que foi corrigido
 
 - **`outbox-relay` passou a publicar em lote** (`PublishBatch`): o throughput do relay deixou de ser o gargalo (foi de ~1 para centenas de eventos/s).
-
-### Como escalar (próximos passos — Fase 5)
-
-O gargalo restante são os **consumers single-threaded** (orquestrador e workers processam 1 evento por vez, com várias escritas no banco por evento). Para suportar 2.000 pedidos/s de forma sustentada:
-
-1. **Processamento concorrente** com goroutines/worker pools nos consumers (partição por `order_id` para preservar a ordem da saga).
-2. **Mais partições** nos tópicos (hoje 1 partição por tópico) para paralelizar consumer groups.
-3. **Escala horizontal** dos workers (consumer groups) e do `outbox-relay`.
-4. Reduzir escritas por evento (ex.: transação atômica estado + journal + outbox já planejada).
-
-Para monitorar o backlog durante a carga:
-
-```bash
-docker-compose exec kafka /bin/sh -c \
-  '/opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group orchestrator'
-
-# Estado das sagas em lote
-docker-compose exec postgres psql -U saga -d saga -c \
-  "SELECT current_status, count(*) FROM sagas WHERE order_id LIKE 'load%' GROUP BY 1 ORDER BY 2 DESC;"
-```
 
 ### Escalabilidade implementada (Fase 5)
 
@@ -712,6 +701,17 @@ docker-compose exec postgres psql -U saga -d saga -c \
   ```
 - **Resultados**: ver `BENCHMARK.md` (3.000 pedidos/60 s: 1 réplica deixa 2.012 na fila;
   3 réplicas + 2 relays deixam 164 — throughput ~12× maior).
+
+Para monitorar o backlog durante a carga:
+
+```bash
+docker-compose exec kafka /bin/sh -c \
+  '/opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group orchestrator'
+
+# Estado das sagas em lote
+docker-compose exec postgres psql -U saga -d saga -c \
+  "SELECT current_status, count(*) FROM sagas WHERE order_id LIKE 'load%' GROUP BY 1 ORDER BY 2 DESC;"
+```
 
 ## Contrato da Mensagem
 
@@ -741,6 +741,9 @@ Serialização atual:
 - banco de leitura com read model (`order_views`) alimentado por projeção via Kafka (CQRS)
 - outbox pattern: eventos decididos vão para a outbox e são publicados pelo `outbox-relay`
 - DLQ: erros definitivos vão para `orders.*.dlq`; idempotência por `event_id`
+- observabilidade distribuída com OpenTelemetry + Jaeger (traces por `order_id`)
+- escalabilidade: 4 partições, `SAGA_WORKERS` (concorrência intra-instância), consumer
+  groups multi-instância, outbox com claims e autoscaler por lag (análogo ao KEDA/HPA)
 - garantia at-least-once + dedup por `event_id` + reentrega do Kafka
 - tópicos separados por etapa
 - eventos terminais enviados para `orders.status`
@@ -758,6 +761,8 @@ Incluído nesta fase:
 - read model no banco de leitura com serviço `projector`
 - outbox pattern com serviço `outbox-relay`
 - DLQ (tópicos `orders.*.dlq`) e idempotência por `event_id`
+- observabilidade distribuída (OpenTelemetry + Jaeger)
+- escalabilidade (4 partições, `SAGA_WORKERS`, multi-instância, outbox com claims, autoscaler)
 - migrations com `golang-migrate` via Docker
 - Docker para execução local
 - debug ponta a ponta no VS Code
@@ -766,22 +771,22 @@ Incluído nesta fase:
 
 - transação atômica única (estado + journal + outbox) — refinamento futuro documentado
 - API REST de consulta de pedido (o read model `order_views` já está pronto para isso)
-- observabilidade formal com tracing e métricas
+- métricas Prometheus + dashboards Grafana (traces já existem via Jaeger)
 - tratamento de produção com políticas avançadas de retry
 
 Fora de escopo nesta fase:
 
 - transação atômica única (estado + journal + outbox)
 - API REST
-- observabilidade formal
+- métricas Prometheus/Grafana
 - integração automatizada (testcontainers)
-- concorrência explícita com goroutines
+- escala horizontal real em Kubernetes (KEDA/HPA)
 
 ## Próximos Passos Naturais
 
-- Fase 4: observabilidade distribuída (OpenTelemetry + Jaeger)
+- Fase 6: métricas Prometheus + dashboards Grafana
+- CI/CD com GitHub Actions (CI funcional: `make check` + testes de integração + imagem Docker)
+- cloud readiness AWS (Helm/Terraform, EKS/ECS + MSK + RDS; KEDA no lugar do autoscaler local)
+- Testcontainers (integração automatizada com Kafka/Postgres reais)
 - API REST de consulta de pedido lendo o read model `order_views`
 - transação atômica única (estado + journal + outbox) para eliminar janelas residuais
-- testes de integração com testcontainers (Kafka + Postgres reais)
-- comparar versão sequencial com versão concorrente
-- evoluir o contrato de mensagens conforme novos cenários# workers-kafka
