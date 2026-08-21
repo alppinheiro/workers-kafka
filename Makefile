@@ -1,8 +1,8 @@
 COMPOSE ?= docker-compose
 ORDER_ID ?= order-001
-SERVICES = kafka kafka-init orchestrator worker-payment worker-inventory worker-notification order-status
+SERVICES = kafka kafka-init postgres migrations postgres-read migrations-read orchestrator worker-payment worker-inventory worker-notification order-status projector
 
-.PHONY: help fmt build vet test lint check up down logs ps create-order rebuild
+.PHONY: help fmt build vet test lint check up down logs ps create-order inspect rebuild
 
 help:
 	@echo "Targets disponiveis:"
@@ -12,11 +12,12 @@ help:
 	@echo "  make test          - roda todos os testes com cobertura"
 	@echo "  make lint          - roda golangci-lint se estiver disponivel"
 	@echo "  make check         - executa fmt, build, vet, test e lint em sequencia"
-	@echo "  make up            - sobe Kafka, orquestrador, workers e auditoria em background"
+	@echo "  make up            - sobe Kafka, Postgres (escrita/leitura), migrations, orquestrador, workers, projector e auditoria em background"
 	@echo "  make down          - derruba a stack Docker"
 	@echo "  make logs          - segue os logs da stack"
 	@echo "  make ps            - lista os servicos da stack"
 	@echo "  make create-order  - publica um pedido usando ORDER_ID=<id>"
+	@echo "  make inspect       - consulta o read model (order_views) de um pedido no banco de leitura"
 	@echo "  make rebuild       - rebuild da stack antes de subir"
 
 fmt:
@@ -55,5 +56,8 @@ ps:
 create-order:
 	$(COMPOSE) run --rm create-order $(ORDER_ID)
 
+inspect:
+	$(COMPOSE) exec postgres-read psql -U saga -d saga_read -c "SELECT order_id, current_status, last_event_type, last_event_at, transaction_id, notification_error, payment_refund_failed FROM order_views WHERE order_id='$(ORDER_ID)'"
+
 rebuild:
-	$(COMPOSE) build orchestrator worker-payment worker-inventory worker-notification order-status create-order
+	$(COMPOSE) build orchestrator worker-payment worker-inventory worker-notification order-status projector create-order

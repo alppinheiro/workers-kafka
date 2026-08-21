@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS saga_events (
     request_payload  JSONB,                   -- payload enviado ao gateway externo
     response_payload JSONB,                   -- resposta do gateway externo
     created_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    UNIQUE (event_id, component)             -- dedup: 1 visão por componente/evento
+    UNIQUE (event_id, component, direction)  -- 1 visão por componente/evento/direção
 );
 
 CREATE INDEX IF NOT EXISTS idx_saga_events_order ON saga_events(order_id, created_at);
@@ -251,7 +251,7 @@ var ErrSagaNotFound = errors.New("saga not found")
 
 | Ponto | Garantia |
 |---|---|
-| Grava no banco e morre antes do publish | Consumer commita **após** o handler; a reentrega do Kafka reprocessa e o dedup (`UNIQUE (event_id, component)`) evita duplicar no `saga_events`. O resultado acaba publicado. |
+| Grava no banco e morre antes do publish | Consumer commita **após** o handler; a reentrega do Kafka reprocessa e o dedup (`UNIQUE (event_id, component, direction)`) evita duplicar no `saga_events`. O resultado acaba publicado. |
 | Publica no Kafka e morre antes do commit | Redelivery; `processed_events` no projector ignora. |
 | Projector escreve e morre antes do commit | Redelivery; `MarkProcessed` é atômico (`INSERT ... ON CONFLICT DO NOTHING`). |
 | Kafka RF=1 (docker-compose) | Limitação do ambiente de estudo. Produção: RF≥3 + `acks=all`. |

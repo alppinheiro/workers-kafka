@@ -1,0 +1,68 @@
+package postgres
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"workers-kafka/internal/application"
+)
+
+// EventLogRepository persiste o journal de eventos (append-only) no banco de escrita.
+type EventLogRepository struct {
+	pool *pgxpool.Pool
+}
+
+// NewEventLogRepository cria o repositório do journal sobre o pool informado.
+func NewEventLogRepository(pool *pgxpool.Pool) *EventLogRepository {
+	return &EventLogRepository{pool: pool}
+}
+
+// Append insere uma linha no journal. A gravação é idempotente por (event_id, component,
+// direction): em caso de redelivery, o conflito de UNIQUE é ignorado (ON CONFLICT DO NOTHING).
+func (r *EventLogRepository) Append(ctx context.Context, entry application.EventLogEntry) error {
+	payloadJSON, err := marshalJSON(entry.Payload)
+	if err != nil {
+		return fmt.Errorf("erro ao serializar payload do evento %s: %w", entry.EventID, err)
+	}
+	requestJSON, err := marshalJSON(entry.RequestPayload)
+	if err != nil {
+		return fmt.Errorf("erro ao serializar request_payload do evento %s: %w", entry.EventID, err)
+	}
+	responseJSON, err := marshalJSON(entry.ResponsePayload)
+	if err != nil {
+		return fmt.Errorf("erro ao serializar response_payload do evento %s: %w", entry.EventID, err)
+	}
+
+	const query = `
+INSERT INTO saga_events (order_id, saga_id, event_id, event_type, component, direction, status_anterior, status_atual, payload, request_payload, response_payload)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+ON CONFLICT (event_id, component, direction) DO NOTHING`
+
+	_, err = r.pool.Exec(ctx, query,
+		entry.OrderID,
+		entry.SagaID,
+		entry.EventID,
+		string(entry.EventType),
+		entry.Component,
+		entry.Direction,
+		string(entry.StatusAnterior),
+		string(entry.StatusAtual),
+		payloadJSON,
+		requestJSON,
+		responseJSON,
+	)
+	if err != nil {
+		return fmt.Errorf("erro ao gravar evento %s no journal: %w", entry.EventID, err)
+	}
+	return nil
+}
+
+func marshalJSON(v any) ([]byte, error) {
+	if v == nil {
+		return nil, nil
+	}
+	return json.Marshal(v)
+}

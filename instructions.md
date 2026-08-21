@@ -12,10 +12,10 @@ A ideia principal é simular o ciclo de vida de um pedido com mudança de status
 - Saídas de erro: `RETRYING` para falha temporária e `FAILED` para falha definitiva.
 - Mensageria: tópicos separados por etapa do fluxo, com `order_id` como chave de particionamento.
 - Interação: `event_type` distingue comando, resultado e falha no payload.
-- Estado do orquestrador: inicialmente em memória/eventos correlacionados; recuperação persistente fica para depois.
+- Estado do orquestrador: persistido em PostgreSQL (tabela `sagas`), com recuperação após restart; todos os eventos e payloads de request/response dos gateways registrados em `saga_events` (rastreabilidade).
 - Serialização: JSON no início, com schema versionado e evolutivo.
 - Kafka em Go: `github.com/segmentio/kafka-go` como escolha inicial, isolado por interfaces.
-- Escopo imediato: sem testes, sem observabilidade, sem banco de dados e sem goroutines explícitas.
+- Escopo atual: testes unitários implementados (Fase 1); persistência e rastreabilidade em execução (Fase 2); observabilidade e goroutines explícitas ainda fora de escopo.
 
 As seções abaixo detalham e complementam esse resumo, evitando repetir decisões já fechadas quando possível.
 
@@ -34,13 +34,18 @@ Essas integrações devem ser desenhadas com abstrações simples para permitir 
 - Os workers devem ficar bem separados para facilitar escala horizontal no futuro.
 - Toda transição precisa carregar e atualizar o status do pedido/evento.
 - Mockery não é a primeira escolha obrigatória; fakes, stubs e interfaces simples podem ser usados primeiro.
+- Persistência do estado da saga: PostgreSQL 16 (banco de escrita) com driver `jackc/pgx/v5`.
+- Banco de leitura: segundo PostgreSQL alimentado por projeção via Kafka (CQRS), com read model `order_views` montado pelo serviço `projector`.
+- Migrations: `golang-migrate/migrate` executadas por container no `docker-compose`.
+- Rastreabilidade: todos os eventos são gravados em `saga_events` (append-only) com `payload`, `request_payload` e `response_payload`.
+- Garantia de dados: at-least-once + dedup por `event_id` + reentrega do Kafka; Outbox Pattern fica para a Fase 3.
 
 ## Fora de escopo nesta fase
 
-- testes unitários
-- integração automatizada
+- integração automatizada com testcontainers (pendência da Fase 1)
 - observabilidade
-- banco de dados
+- API REST de consulta de pedido (futuro — lê o read model `order_views`)
+- Outbox Pattern, DLQ e idempotência completa (Fase 3)
 - concorrência explícita com goroutines
 
 ## Diretrizes técnicas
@@ -84,7 +89,11 @@ Essas integrações devem ser desenhadas com abstrações simples para permitir 
 - `internal/application/` para casos de uso, orquestração do fluxo e coordenação entre etapas.
 - `internal/infrastructure/kafka/` para producer, consumer, serialização e configuração de tópicos.
 - `internal/infrastructure/external/` para simuladores das APIs de pagamento, estoque e notificação.
+- `internal/infrastructure/persistence/postgres/` para repositórios do banco de escrita (`SagaRepository`, `EventLogRepository`).
+- `internal/infrastructure/persistence/postgres_read/` para o repositório do read model (`OrderViewRepository`).
+- `internal/application/projector/` para o caso de uso que projeta eventos do Kafka no read model.
 - `internal/interfaces/` para handlers, adapters e qualquer integração de entrada ou saída que converse com a aplicação.
+- `cmd/projector/` para o consumer de projeção (read model).
 - Um consumer adicional de auditoria pode existir em `cmd/` para observar eventos finais publicados em `orders.status`.
 
 ## Onde a camada Kafka fica no desenho
@@ -321,7 +330,13 @@ Este fluxo já está consolidado no topo do documento e segue a sequência `PEND
 - Criar simuladores para pagamento, estoque e notificação.
 - Permitir que esses simuladores sejam substituídos por implementações reais no futuro.
 
-### Fase 4: comparação de desempenho
+### Fase 4: persistência e rastreabilidade
+- Persistir o estado da saga em PostgreSQL (banco de escrita) com recuperação após restart.
+- Registrar todos os eventos e payloads de request/response dos gateways em `saga_events`.
+- Criar banco de leitura com read model `order_views` alimentado por projeção via Kafka (serviço `projector`).
+- Garantir at-least-once + dedup por `event_id` + reentrega do Kafka.
+
+### Fase 5: comparação de desempenho
 - Introduzir goroutines e concorrência explícita.
 - Comparar comportamento e desempenho com a versão sequencial.
 
@@ -342,6 +357,10 @@ Este fluxo já está consolidado no topo do documento e segue a sequência `PEND
 - O fluxo de debug ponta a ponta no VS Code pode usar Kafka em Docker e os binários Go em modo debug local, com `KAFKA_BROKERS=localhost:9094` para todos os processos instrumentados pelo editor.
 - A sessão composta de debug deve subir `kafka` e `kafka-init` antes do attach/launch dos processos e permitir disparar um pedido manual com `create-order` usando um `order_id` informado em prompt.
 - Os logs de debug agora devem permitir acompanhar tanto a publicação quanto o consumo dos eventos e também as decisões internas do orquestrador, sempre correlacionando por `order_id` e `saga_id`.
+- Fase 2 (persistência e rastreabilidade) em execução conforme `PHASE_2_PLAN.md`: estado da saga persistido em `sagas`, todos os eventos com payloads request/response em `saga_events`, read model `order_views` no banco de leitura projetado via Kafka pelo serviço `projector`.
+- Banco de escrita em `postgres:5433` (db `saga`) e banco de leitura em `postgres-read:5434` (db `saga_read`), com migrations `golang-migrate/migrate` via docker.
+- Garantia de dados: at-least-once + dedup por `event_id` + reentrega do Kafka; Outbox Pattern adiado para a Fase 3.
+- Consulta do read model nesta fase via SQL (psql); API REST de consulta de pedido fica para uma fase futura.
 
 ## Observação
 

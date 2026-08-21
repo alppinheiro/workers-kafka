@@ -9,11 +9,13 @@ import (
 
 	"workers-kafka/internal/application/orchestrator"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
+	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 	"workers-kafka/internal/interfaces"
 )
 
-// main sobe o orquestrador da saga: um único consumer acompanha os três tópicos de resultado
-// (pagamento, estoque e notificação) sem depender de goroutines adicionais.
+// main sobe o orquestrador da saga: um único consumer acompanha os três tópicos de
+// resultado (pagamento, estoque e notificação) sem depender de goroutines adicionais.
+// O estado da saga é persistido em PostgreSQL e as transições são registradas no journal.
 func main() {
 	brokers := infrakafka.BrokersFromEnv()
 
@@ -32,10 +34,19 @@ func main() {
 	})
 	defer func() { _ = consumer.Close() }()
 
-	orch := orchestrator.New(producer, 3)
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	pool, err := infrapostgres.Connect(ctx, infrapostgres.DatabaseURLFromEnv())
+	if err != nil {
+		log.Fatalf("orquestrador: %v", err)
+	}
+	defer pool.Close()
+
+	sagaRepo := infrapostgres.NewSagaRepository(pool)
+	eventLog := infrapostgres.NewEventLogRepository(pool)
+
+	orch := orchestrator.New(producer, sagaRepo, eventLog, 3)
 
 	log.Println("orquestrador: aguardando eventos")
 	if err := consumer.Consume(ctx, interfaces.WithLogging("orchestrator", orch.HandleEvent)); err != nil && ctx.Err() == nil {

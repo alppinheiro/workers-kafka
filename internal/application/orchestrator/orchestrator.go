@@ -10,52 +10,61 @@ import (
 	"workers-kafka/internal/domain"
 )
 
-// sagaState guarda o estado lógico de uma saga em andamento, mantido apenas em memória nesta fase.
-type sagaState struct {
-	previous      domain.OrderStatus
-	current       domain.OrderStatus
-	retryCount    int
-	transactionID string
-}
-
-// Orchestrator coordena o avanço, retry e encerramento da saga do pedido, sem executar regra de negócio das etapas.
+// Orchestrator coordena o avanço, retry e encerramento da saga do pedido, sem executar
+// regra de negócio das etapas. O estado da saga é persistido em um SagaRepository e cada
+// transição é registrada no journal de eventos para rastreabilidade.
 type Orchestrator struct {
 	publisher  application.EventPublisher
-	states     map[string]*sagaState
+	sagas      application.SagaRepository
+	eventLog   application.EventLogRepository
 	maxRetries int
 }
 
-// New cria um orquestrador com o publisher usado para disparar os próximos comandos e o limite de tentativas de retry.
-func New(publisher application.EventPublisher, maxRetries int) *Orchestrator {
+// New cria um orquestrador com o publisher usado para disparar os próximos comandos, o
+// repositório de sagas, o journal de eventos e o limite de tentativas de retry.
+func New(publisher application.EventPublisher, sagas application.SagaRepository, eventLog application.EventLogRepository, maxRetries int) *Orchestrator {
 	return &Orchestrator{
 		publisher:  publisher,
-		states:     make(map[string]*sagaState),
+		sagas:      sagas,
+		eventLog:   eventLog,
 		maxRetries: maxRetries,
 	}
 }
 
-// StartOrder inicia uma nova saga em PENDING e dispara o primeiro comando do fluxo.
-func (o *Orchestrator) StartOrder(ctx context.Context, orderID string) error {
-	if _, exists := o.states[orderID]; exists {
-		return fmt.Errorf("saga já iniciada para o pedido %s", orderID)
+// StartOrder inicia uma nova saga em PENDING a partir do ORDER_CREATED e dispara o
+// primeiro comando do fluxo.
+func (o *Orchestrator) StartOrder(ctx context.Context, event domain.Event) error {
+	if _, err := o.sagas.Load(ctx, event.OrderID); err == nil {
+		return fmt.Errorf("saga já iniciada para o pedido %s", event.OrderID)
+	} else if err != application.ErrSagaNotFound {
+		return fmt.Errorf("erro ao verificar saga para o pedido %s: %w", event.OrderID, err)
 	}
 
-	o.states[orderID] = &sagaState{current: domain.StatusPending}
-	log.Printf("component=orchestrator phase=decision action=start order_id=%s saga_id=%s state_current=%s retry_count=%d", orderID, orderID, domain.StatusPending, 0)
-	return o.dispatchNext(ctx, orderID)
+	saga := domain.Saga{OrderID: event.OrderID, Current: domain.StatusPending}
+
+	if err := o.logEvent(ctx, saga, event.EventID, domain.EventOrderCreated, application.DirectionIn, domain.StatusPending, event, nil, nil); err != nil {
+		return err
+	}
+	if err := o.sagas.Save(ctx, saga); err != nil {
+		return err
+	}
+
+	log.Printf("component=orchestrator phase=decision action=start order_id=%s saga_id=%s state_current=%s retry_count=%d", event.OrderID, event.OrderID, domain.StatusPending, 0)
+	return o.dispatchNext(ctx, &saga)
 }
 
-// HandleEvent é o ponto único de entrada do orquestrador: inicia a saga na criação do pedido e
-// delega os demais eventos para HandleResult.
+// HandleEvent é o ponto único de entrada do orquestrador: inicia a saga na criação do
+// pedido e delega os demais eventos para HandleResult.
 func (o *Orchestrator) HandleEvent(ctx context.Context, event domain.Event) error {
 	if event.EventType == domain.EventOrderCreated {
 		log.Printf("component=orchestrator phase=decision action=handle-created order_id=%s saga_id=%s event_id=%s type=%s", event.OrderID, event.SagaID, event.EventID, event.EventType)
-		return o.StartOrder(ctx, event.OrderID)
+		return o.StartOrder(ctx, event)
 	}
 	return o.HandleResult(ctx, event)
 }
 
-// HandleResult reage a um evento de resultado publicado por um dos workers e decide o próximo passo da saga.
+// HandleResult reage a um evento de resultado publicado por um dos workers e decide o
+// próximo passo da saga, salvando o novo estado antes de publicar.
 func (o *Orchestrator) HandleResult(ctx context.Context, event domain.Event) error {
 	switch event.EventType {
 	case domain.EventPaymentResult, domain.EventPaymentCompensateResult, domain.EventInventoryResult, domain.EventNotificationResult:
@@ -64,9 +73,16 @@ func (o *Orchestrator) HandleResult(ctx context.Context, event domain.Event) err
 		return nil // comandos publicados pelo próprio orquestrador não são de seu interesse.
 	}
 
-	state, ok := o.states[event.OrderID]
-	if !ok {
-		return fmt.Errorf("saga desconhecida para o pedido %s", event.OrderID)
+	saga, err := o.sagas.Load(ctx, event.OrderID)
+	if err != nil {
+		if err == application.ErrSagaNotFound {
+			return fmt.Errorf("saga desconhecida para o pedido %s", event.OrderID)
+		}
+		return fmt.Errorf("erro ao carregar saga para o pedido %s: %w", event.OrderID, err)
+	}
+
+	if err := o.logEvent(ctx, saga, event.EventID, event.EventType, application.DirectionIn, event.StatusAtual, event, nil, nil); err != nil {
+		return err
 	}
 
 	expectedStatus, err := expectedStatusForResult(event.EventType)
@@ -74,8 +90,8 @@ func (o *Orchestrator) HandleResult(ctx context.Context, event domain.Event) err
 		return err
 	}
 
-	if state.current != expectedStatus {
-		return fmt.Errorf("evento fora de ordem para o pedido %s: resultado %s exige saga em %s, mas estava em %s", event.OrderID, event.EventType, expectedStatus, state.current)
+	if saga.Current != expectedStatus {
+		return fmt.Errorf("evento fora de ordem para o pedido %s: resultado %s exige saga em %s, mas estava em %s", event.OrderID, event.EventType, expectedStatus, saga.Current)
 	}
 
 	if err := validateResultStatus(event.EventType, event.StatusAtual); err != nil {
@@ -84,145 +100,194 @@ func (o *Orchestrator) HandleResult(ctx context.Context, event domain.Event) err
 
 	switch event.StatusAtual {
 	case domain.StatusRetrying:
-		log.Printf("component=orchestrator phase=decision action=retry-requested order_id=%s saga_id=%s event_id=%s type=%s state_current=%s retry_count=%d metadata=%v", event.OrderID, event.SagaID, event.EventID, event.EventType, state.current, state.retryCount, event.Metadata)
-		return o.retry(ctx, event.OrderID, state)
+		log.Printf("component=orchestrator phase=decision action=retry-requested order_id=%s saga_id=%s event_id=%s type=%s state_current=%s retry_count=%d metadata=%v", event.OrderID, event.SagaID, event.EventID, event.EventType, saga.Current, saga.RetryCount, event.Metadata)
+		return o.retry(ctx, &saga)
 	case domain.StatusFailed:
 		// special-case: notification failures do not change order outcome - treat as completed (notification requested but failed)
 		if event.EventType == domain.EventNotificationResult {
 			log.Printf("component=orchestrator phase=decision action=notification-failed-ignored order_id=%s saga_id=%s event_id=%s metadata=%v", event.OrderID, event.SagaID, event.EventID, event.Metadata)
-			// mark saga completed even if notification failed; include metadata to signal notification problem
 			meta := map[string]string{"notification_error": "true"}
-			return o.complete(ctx, event.OrderID, state, meta)
+			return o.complete(ctx, &saga, meta)
 		}
 
-		// special-case: if inventory failed but payment was previously approved, request async compensation
-		log.Printf("component=orchestrator phase=decision action=fail-requested order_id=%s saga_id=%s event_id=%s type=%s state_current=%s retry_count=%d metadata=%v", event.OrderID, event.SagaID, event.EventID, event.EventType, state.current, state.retryCount, event.Metadata)
-		if event.EventType == domain.EventInventoryResult && state.current == domain.StatusPaymentApproved && state.transactionID != "" {
-			return o.startCompensation(ctx, event.OrderID, state)
+		log.Printf("component=orchestrator phase=decision action=fail-requested order_id=%s saga_id=%s event_id=%s type=%s state_current=%s retry_count=%d metadata=%v", event.OrderID, event.SagaID, event.EventID, event.EventType, saga.Current, saga.RetryCount, event.Metadata)
+		if event.EventType == domain.EventInventoryResult && saga.Current == domain.StatusPaymentApproved && saga.TransactionID != "" {
+			return o.startCompensation(ctx, &saga)
 		}
 
 		if event.EventType == domain.EventPaymentCompensateResult {
 			metadata := cloneMetadata(event.Metadata)
 			metadata["payment_refund_failed"] = "true"
 			metadata["transaction_id"] = event.TransactionID
-			return o.fail(ctx, event.OrderID, state, metadata)
+			return o.fail(ctx, &saga, metadata)
 		}
-		return o.fail(ctx, event.OrderID, state, event.Metadata)
+		return o.fail(ctx, &saga, event.Metadata)
 	case domain.StatusPaymentApproved, domain.StatusInventoryReserved:
-		log.Printf("component=orchestrator phase=decision action=advance order_id=%s saga_id=%s event_id=%s type=%s from=%s to=%s retry_count=%d", event.OrderID, event.SagaID, event.EventID, event.EventType, state.current, event.StatusAtual, state.retryCount)
-		state.previous = state.current
-		state.current = event.StatusAtual
-		state.retryCount = 0
+		log.Printf("component=orchestrator phase=decision action=advance order_id=%s saga_id=%s event_id=%s type=%s from=%s to=%s retry_count=%d", event.OrderID, event.SagaID, event.EventID, event.EventType, saga.Current, event.StatusAtual, saga.RetryCount)
+		saga.Previous = saga.Current
+		saga.Current = event.StatusAtual
+		saga.RetryCount = 0
 		// if payment was approved, persist the transaction id for potential future compensation
 		if event.EventType == domain.EventPaymentResult {
-			state.transactionID = event.TransactionID
+			saga.TransactionID = event.TransactionID
 		}
-		return o.dispatchNext(ctx, event.OrderID)
+		if err := o.sagas.Save(ctx, saga); err != nil {
+			return err
+		}
+		return o.dispatchNext(ctx, &saga)
 	case domain.StatusPaymentRefunded:
 		log.Printf("component=orchestrator phase=decision action=refund-completed order_id=%s saga_id=%s event_id=%s tx=%s", event.OrderID, event.SagaID, event.EventID, event.TransactionID)
 		metadata := cloneMetadata(event.Metadata)
 		metadata["payment_refunded"] = "true"
 		metadata["transaction_id"] = event.TransactionID
-		return o.fail(ctx, event.OrderID, state, metadata)
+		return o.fail(ctx, &saga, metadata)
 	case domain.StatusNotified:
-		log.Printf("component=orchestrator phase=decision action=complete-requested order_id=%s saga_id=%s event_id=%s type=%s state_current=%s", event.OrderID, event.SagaID, event.EventID, event.EventType, state.current)
-		return o.complete(ctx, event.OrderID, state, nil)
+		log.Printf("component=orchestrator phase=decision action=complete-requested order_id=%s saga_id=%s event_id=%s type=%s state_current=%s", event.OrderID, event.SagaID, event.EventID, event.EventType, saga.Current)
+		return o.complete(ctx, &saga, nil)
 	default:
 		return fmt.Errorf("status inesperado recebido pelo orquestrador para o pedido %s: %s", event.OrderID, event.StatusAtual)
 	}
 }
 
-// retry contabiliza uma nova tentativa e reenvia o mesmo comando, ou encerra a saga como FAILED se o limite estourar.
-func (o *Orchestrator) retry(ctx context.Context, orderID string, state *sagaState) error {
-	state.retryCount++
-	log.Printf("component=orchestrator phase=decision action=retrying order_id=%s saga_id=%s state_current=%s retry_count=%d", orderID, orderID, state.current, state.retryCount)
-	if state.retryCount > o.maxRetries {
-		metadata := map[string]string{"motivo": "retry_limit_exceeded"}
-		log.Printf("component=orchestrator phase=decision action=retry-limit-exceeded order_id=%s saga_id=%s state_current=%s retry_count=%d", orderID, orderID, state.current, state.retryCount)
-		// special-case: if we're in notification stage, do not fail the order on exhausted retries
-		if state.current == domain.StatusInventoryReserved {
-			meta := map[string]string{"notification_error": "true", "motivo": "retry_limit_exceeded"}
-			return o.complete(ctx, orderID, state, meta)
-		}
-		if state.current == domain.StatusPaymentRefundPending {
-			metadata["payment_refund_failed"] = "true"
-			metadata["transaction_id"] = state.transactionID
-		}
-		return o.fail(ctx, orderID, state, metadata)
+// retry contabiliza uma nova tentativa e reenvia o mesmo comando, ou encerra a saga
+// como FAILED se o limite de tentativas for excedido.
+func (o *Orchestrator) retry(ctx context.Context, saga *domain.Saga) error {
+	saga.RetryCount++
+	if err := o.sagas.Save(ctx, *saga); err != nil {
+		return err
 	}
-	return o.dispatchNext(ctx, orderID)
+	log.Printf("component=orchestrator phase=decision action=retrying order_id=%s saga_id=%s state_current=%s retry_count=%d", saga.OrderID, saga.OrderID, saga.Current, saga.RetryCount)
+	if saga.RetryCount > o.maxRetries {
+		metadata := map[string]string{"motivo": "retry_limit_exceeded"}
+		log.Printf("component=orchestrator phase=decision action=retry-limit-exceeded order_id=%s saga_id=%s state_current=%s retry_count=%d", saga.OrderID, saga.OrderID, saga.Current, saga.RetryCount)
+		// special-case: falhas de notificação não derrubam o pedido mesmo após esgotar o retry.
+		if saga.Current == domain.StatusInventoryReserved {
+			meta := map[string]string{"notification_error": "true", "motivo": "retry_limit_exceeded"}
+			return o.complete(ctx, saga, meta)
+		}
+		if saga.Current == domain.StatusPaymentRefundPending {
+			metadata["payment_refund_failed"] = "true"
+			metadata["transaction_id"] = saga.TransactionID
+		}
+		return o.fail(ctx, saga, metadata)
+	}
+	return o.dispatchNext(ctx, saga)
 }
 
-func (o *Orchestrator) startCompensation(ctx context.Context, orderID string, state *sagaState) error {
-	state.previous = state.current
-	state.current = domain.StatusPaymentRefundPending
-	state.retryCount = 0
-	log.Printf("component=orchestrator phase=decision action=start-compensation order_id=%s saga_id=%s tx=%s", orderID, orderID, state.transactionID)
-	return o.dispatchNext(ctx, orderID)
+// startCompensation inicia o estorno do pagamento quando uma etapa posterior falha após
+// a aprovação, salvando o novo estado antes de publicar o comando de compensação.
+func (o *Orchestrator) startCompensation(ctx context.Context, saga *domain.Saga) error {
+	saga.Previous = saga.Current
+	saga.Current = domain.StatusPaymentRefundPending
+	saga.RetryCount = 0
+	if err := o.sagas.Save(ctx, *saga); err != nil {
+		return err
+	}
+	log.Printf("component=orchestrator phase=decision action=start-compensation order_id=%s saga_id=%s tx=%s", saga.OrderID, saga.OrderID, saga.TransactionID)
+	return o.dispatchNext(ctx, saga)
 }
 
 // fail encerra a saga com FAILED e publica um evento terminal para rastreabilidade externa.
-func (o *Orchestrator) fail(ctx context.Context, orderID string, state *sagaState, metadata map[string]string) error {
-	previousStatus := state.current
-	state.previous = previousStatus
-	state.current = domain.StatusFailed
-	state.retryCount = 0
-	log.Printf("component=orchestrator phase=decision action=failed order_id=%s saga_id=%s from=%s to=%s metadata=%v", orderID, orderID, previousStatus, domain.StatusFailed, metadata)
+func (o *Orchestrator) fail(ctx context.Context, saga *domain.Saga, metadata map[string]string) error {
+	previousStatus := saga.Current
+	saga.Previous = previousStatus
+	saga.Current = domain.StatusFailed
+	saga.RetryCount = 0
+	if err := o.sagas.Save(ctx, *saga); err != nil {
+		return err
+	}
+	log.Printf("component=orchestrator phase=decision action=failed order_id=%s saga_id=%s from=%s to=%s metadata=%v", saga.OrderID, saga.OrderID, previousStatus, domain.StatusFailed, metadata)
 
-	return o.publisher.Publish(ctx, terminalEvent(orderID, previousStatus, domain.StatusFailed, domain.EventOrderFailed, metadata))
+	terminal := terminalEvent(saga.OrderID, previousStatus, domain.StatusFailed, domain.EventOrderFailed, metadata)
+	if err := o.logEvent(ctx, *saga, terminal.EventID, domain.EventOrderFailed, application.DirectionOut, domain.StatusFailed, terminal, nil, nil); err != nil {
+		return err
+	}
+	return o.publisher.Publish(ctx, terminal)
 }
 
 // complete encerra a saga em COMPLETED após receber a confirmação NOTIFIED do worker final.
-// metadata opcional pode conter informações sobre falhas não-fatais (ex.: notificações).
-func (o *Orchestrator) complete(ctx context.Context, orderID string, state *sagaState, metadata map[string]string) error {
-	state.previous = state.current
-	state.current = domain.StatusNotified
-	state.retryCount = 0
-	log.Printf("component=orchestrator phase=decision action=publishing-completed order_id=%s saga_id=%s from=%s to=%s metadata=%v", orderID, orderID, domain.StatusNotified, domain.StatusCompleted, metadata)
+// O metadata opcional pode conter informações sobre falhas não-fatais (ex.: notificações).
+func (o *Orchestrator) complete(ctx context.Context, saga *domain.Saga, metadata map[string]string) error {
+	saga.Previous = saga.Current
+	saga.Current = domain.StatusNotified
+	saga.RetryCount = 0
+	if err := o.sagas.Save(ctx, *saga); err != nil {
+		return err
+	}
+	log.Printf("component=orchestrator phase=decision action=publishing-completed order_id=%s saga_id=%s from=%s to=%s metadata=%v", saga.OrderID, saga.OrderID, domain.StatusNotified, domain.StatusCompleted, metadata)
 
-	if err := o.publisher.Publish(ctx, terminalEvent(orderID, domain.StatusNotified, domain.StatusCompleted, domain.EventOrderCompleted, metadata)); err != nil {
+	terminal := terminalEvent(saga.OrderID, domain.StatusNotified, domain.StatusCompleted, domain.EventOrderCompleted, metadata)
+	if err := o.logEvent(ctx, *saga, terminal.EventID, domain.EventOrderCompleted, application.DirectionOut, domain.StatusCompleted, terminal, nil, nil); err != nil {
+		return err
+	}
+	if err := o.publisher.Publish(ctx, terminal); err != nil {
 		return err
 	}
 
-	state.previous = domain.StatusNotified
-	state.current = domain.StatusCompleted
-	log.Printf("component=orchestrator phase=decision action=completed order_id=%s saga_id=%s state_current=%s", orderID, orderID, state.current)
+	saga.Previous = domain.StatusNotified
+	saga.Current = domain.StatusCompleted
+	if err := o.sagas.Save(ctx, *saga); err != nil {
+		return err
+	}
+	log.Printf("component=orchestrator phase=decision action=completed order_id=%s saga_id=%s state_current=%s", saga.OrderID, saga.OrderID, saga.Current)
 	return nil
 }
 
-// dispatchNext publica o comando correspondente à etapa seguinte ao status atual da saga.
-// Reenviar o mesmo comando em caso de retry é seguro, pois o status alvo já reflete a etapa em andamento.
-func (o *Orchestrator) dispatchNext(ctx context.Context, orderID string) error {
-	state, ok := o.states[orderID]
-	if !ok {
-		return fmt.Errorf("saga desconhecida para o pedido %s", orderID)
-	}
-
-	targetStatus, eventType, err := nextCommand(state.current)
+// dispatchNext publica o comando correspondente à etapa seguinte ao status atual da saga,
+// salvando o novo estado e registrando o comando no journal antes de publicar.
+func (o *Orchestrator) dispatchNext(ctx context.Context, saga *domain.Saga) error {
+	targetStatus, eventType, err := nextCommand(saga.Current)
 	if err != nil {
 		return err
 	}
 
 	command := domain.Event{
 		EventID:        domain.NewEventID(),
-		OrderID:        orderID,
-		SagaID:         orderID,
-		TransactionID:  state.transactionID,
-		StatusAnterior: state.previous,
+		OrderID:        saga.OrderID,
+		SagaID:         saga.OrderID,
+		TransactionID:  saga.TransactionID,
+		StatusAnterior: saga.Previous,
 		StatusAtual:    targetStatus,
 		EventType:      eventType,
 		SchemaVersion:  domain.CurrentSchemaVersion,
 		CreatedAt:      time.Now().UTC(),
 	}
 
-	if targetStatus != state.current {
-		state.previous = state.current
-		state.current = targetStatus
+	if targetStatus != saga.Current {
+		saga.Previous = saga.Current
+		saga.Current = targetStatus
 	}
 
-	log.Printf("component=orchestrator phase=decision action=dispatch-next order_id=%s saga_id=%s event_type=%s status_previous=%s status_current=%s retry_count=%d", orderID, orderID, eventType, command.StatusAnterior, command.StatusAtual, state.retryCount)
+	if err := o.sagas.Save(ctx, *saga); err != nil {
+		return err
+	}
+	if err := o.logEvent(ctx, *saga, command.EventID, eventType, application.DirectionOut, targetStatus, command, nil, nil); err != nil {
+		return err
+	}
+
+	log.Printf("component=orchestrator phase=decision action=dispatch-next order_id=%s saga_id=%s event_type=%s status_previous=%s status_current=%s retry_count=%d", saga.OrderID, saga.OrderID, eventType, command.StatusAnterior, command.StatusAtual, saga.RetryCount)
 
 	return o.publisher.Publish(ctx, command)
+}
+
+// logEvent registra a visão do orquestrador sobre um evento no journal (append-only).
+func (o *Orchestrator) logEvent(ctx context.Context, saga domain.Saga, eventID string, eventType domain.EventType, direction string, status domain.OrderStatus, payload, requestPayload, responsePayload any) error {
+	if o.eventLog == nil {
+		return nil
+	}
+	return o.eventLog.Append(ctx, application.EventLogEntry{
+		OrderID:         saga.OrderID,
+		SagaID:          saga.OrderID,
+		EventID:         eventID,
+		EventType:       eventType,
+		Component:       "orchestrator",
+		Direction:       direction,
+		StatusAnterior:  saga.Previous,
+		StatusAtual:     status,
+		Payload:         payload,
+		RequestPayload:  requestPayload,
+		ResponsePayload: responsePayload,
+	})
 }
 
 // nextCommand mapeia o status atual da saga para o status alvo e o tipo de comando que aciona o próximo worker.

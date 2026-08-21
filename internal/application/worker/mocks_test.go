@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"workers-kafka/internal/application"
 	"workers-kafka/internal/domain"
 )
 
@@ -64,6 +65,16 @@ type mockNotificationGateway struct {
 
 func (m *mockNotificationGateway) Notify(_ context.Context, _ string) (bool, error) {
 	return m.sent, m.err
+}
+
+// fakeEventLog captura as entradas do journal de eventos para asserções.
+type fakeEventLog struct {
+	entries []application.EventLogEntry
+}
+
+func (f *fakeEventLog) Append(_ context.Context, entry application.EventLogEntry) error {
+	f.entries = append(f.entries, entry)
+	return nil
 }
 
 var errSimulado = errors.New("erro simulado do gateway")

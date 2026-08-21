@@ -21,15 +21,22 @@ A evolução foi dividida em 5 fases sequenciais. A ordem é crítica: não otim
     - Fluxo de Compensação: \`PAYMENT_APPROVED -> INVENTORY_FAIL -> PAYMENT_REFUNDED\`.
     - Fluxo de Retry: Validar que o sistema tenta X vezes antes de falhar.
 
-## 💾 Fase 2: A Memória do Sistema (Persistência de Estado)
-**Objetivo:** Eliminar a perda de estado em caso de restart do orquestrador.
+## 💾 Fase 2: A Memória do Sistema (Persistência e Rastreabilidade)
+**Objetivo:** Eliminar a perda de estado em caso de restart do orquestrador e registrar todos os eventos para rastreabilidade.
+
+🔄 **Em execução** — ver `PHASE_2_PLAN.md` para o plano detalhado.
 
 - [ ] **Definição de Tecnologia:**
-    - Implementar Redis (K-V store) ou PostgreSQL (Relacional) para salvar o estado da saga.
+    - Implementar PostgreSQL (Relacional) para salvar o estado da saga. *(decidido: PostgreSQL 16, driver `jackc/pgx/v5`)*
 - [ ] **Camada de Persistência:**
-    - Criar \`internal/infrastructure/persistence\` com interfaces de \`SagaRepository\`.
+    - Criar `internal/infrastructure/persistence` com interfaces de `SagaRepository`.
+    - **Journal de eventos:** tabela `saga_events` (append-only) com `payload`, `request_payload` e `response_payload` dos gateways.
+    - **Banco de leitura:** read model `order_views` alimentado por projeção via Kafka (serviço `projector`).
 - [ ] **Refatoração do Orquestrador:**
-    - Implementar o padrão: \`Consome Evento -> Recupera Estado do DB -> Processa Lógica -> Salva Novo Estado -> Publica Próximo Evento\`.
+    - Implementar o padrão: `Consome Evento -> Recupera Estado do DB -> Processa Lógica -> Salva Novo Estado -> Publica Próximo Evento`.
+    - Workers também registram eventos `IN`/`OUT` e `GATEWAY_REQUEST`/`GATEWAY_RESPONSE`.
+- [ ] **Migrations:**
+    - `golang-migrate/migrate` via container no `docker-compose` (diretórios `migrations/` e `migrations-read/`).
 
 ## 🧱 Fase 3: O Escudo de Resiliência (Robustez e DLQ)
 **Objetivo:** Garantir a estabilidade do pipeline diante de "poison pills" e duplicidades.

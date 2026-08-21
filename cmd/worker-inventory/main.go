@@ -10,6 +10,7 @@ import (
 	"workers-kafka/internal/application/worker"
 	"workers-kafka/internal/infrastructure/external"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
+	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 	"workers-kafka/internal/interfaces"
 )
 
@@ -28,10 +29,18 @@ func main() {
 	defer func() { _ = consumer.Close() }()
 
 	gateway := external.NewInventorySimulator(0.9)
-	useCase := worker.NewInventoryUseCase(gateway, producer)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	pool, err := infrapostgres.Connect(ctx, infrapostgres.DatabaseURLFromEnv())
+	if err != nil {
+		log.Fatalf("worker de estoque: %v", err)
+	}
+	defer pool.Close()
+
+	eventLog := infrapostgres.NewEventLogRepository(pool)
+	useCase := worker.NewInventoryUseCase(gateway, producer, eventLog)
 
 	log.Println("worker de estoque: aguardando comandos")
 	if err := consumer.Consume(ctx, interfaces.WithLogging("worker-inventory", useCase.Handle)); err != nil && ctx.Err() == nil {

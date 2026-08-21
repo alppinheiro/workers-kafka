@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 
 	"workers-kafka/internal/domain"
 )
@@ -35,4 +36,55 @@ type InventoryGateway interface {
 // NotificationGateway simula a chamada à API externa de notificação.
 type NotificationGateway interface {
 	Notify(ctx context.Context, orderID string) (sent bool, err error)
+}
+
+// SagaRepository persiste e recupera o estado corrente de uma saga por order_id.
+type SagaRepository interface {
+	Save(ctx context.Context, saga domain.Saga) error
+	Load(ctx context.Context, orderID string) (domain.Saga, error)
+}
+
+// ErrSagaNotFound é retornado por SagaRepository.Load quando não existe saga para o order_id.
+var ErrSagaNotFound = errors.New("saga not found")
+
+// Directions possíveis para um registro do journal de eventos (EventLogEntry).
+const (
+	// DirectionIn marca um evento consumido/entrada de um componente.
+	DirectionIn = "IN"
+	// DirectionOut marca um evento publicado/saída de um componente.
+	DirectionOut = "OUT"
+	// DirectionGatewayRequest marca a chamada de saída a um gateway externo.
+	DirectionGatewayRequest = "GATEWAY_REQUEST"
+	// DirectionGatewayResponse marca a resposta recebida de um gateway externo.
+	DirectionGatewayResponse = "GATEWAY_RESPONSE"
+)
+
+// EventLogEntry representa uma linha do journal de eventos: a visão de um componente
+// sobre um evento do barramento e, quando aplicável, os payloads de request/response
+// trocados com gateways externos.
+type EventLogEntry struct {
+	OrderID         string
+	SagaID          string
+	EventID         string
+	EventType       domain.EventType
+	Component       string
+	Direction       string
+	StatusAnterior  domain.OrderStatus
+	StatusAtual     domain.OrderStatus
+	Payload         any
+	RequestPayload  any
+	ResponsePayload any
+}
+
+// EventLogRepository persiste o journal de eventos (append-only) para rastreabilidade.
+type EventLogRepository interface {
+	Append(ctx context.Context, entry EventLogEntry) error
+}
+
+// OrderViewRepository persiste o read model de pedidos no banco de leitura.
+type OrderViewRepository interface {
+	// ApplyEvent atualiza o read model a partir de um evento do barramento.
+	ApplyEvent(ctx context.Context, event domain.Event) error
+	// MarkProcessed registra o event_id como processado; retorna false se já existia.
+	MarkProcessed(ctx context.Context, eventID string) (bool, error)
 }

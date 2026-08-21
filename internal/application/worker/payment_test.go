@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"workers-kafka/internal/application"
 	"workers-kafka/internal/domain"
 )
 
@@ -21,7 +22,7 @@ func paymentCommand(orderID string) domain.Event {
 
 func TestPaymentUseCase_Handle_IgnoredEventType(t *testing.T) {
 	pub := &mockPublisher{}
-	uc := NewPaymentUseCase(&mockPaymentGateway{}, pub)
+	uc := NewPaymentUseCase(&mockPaymentGateway{}, pub, &fakeEventLog{})
 
 	err := uc.Handle(context.Background(), resultEvent("order-001", domain.EventPaymentResult, domain.StatusPaymentApproved))
 	if err != nil {
@@ -34,7 +35,7 @@ func TestPaymentUseCase_Handle_IgnoredEventType(t *testing.T) {
 
 func TestPaymentUseCase_Handle_InvalidStatus(t *testing.T) {
 	pub := &mockPublisher{}
-	uc := NewPaymentUseCase(&mockPaymentGateway{}, pub)
+	uc := NewPaymentUseCase(&mockPaymentGateway{}, pub, &fakeEventLog{})
 
 	event := paymentCommand("order-001")
 	event.StatusAtual = domain.StatusPaymentApproved // status errado
@@ -51,7 +52,7 @@ func TestPaymentUseCase_Handle_InvalidStatus(t *testing.T) {
 func TestPaymentUseCase_Handle_Approved(t *testing.T) {
 	pub := &mockPublisher{}
 	gateway := &mockPaymentGateway{approved: true, transactionID: "tx-1"}
-	uc := NewPaymentUseCase(gateway, pub)
+	uc := NewPaymentUseCase(gateway, pub, &fakeEventLog{})
 
 	err := uc.Handle(context.Background(), paymentCommand("order-001"))
 	if err != nil {
@@ -76,7 +77,7 @@ func TestPaymentUseCase_Handle_Approved(t *testing.T) {
 func TestPaymentUseCase_Handle_Rejected(t *testing.T) {
 	pub := &mockPublisher{}
 	gateway := &mockPaymentGateway{approved: false}
-	uc := NewPaymentUseCase(gateway, pub)
+	uc := NewPaymentUseCase(gateway, pub, &fakeEventLog{})
 
 	err := uc.Handle(context.Background(), paymentCommand("order-001"))
 	if err != nil {
@@ -92,7 +93,7 @@ func TestPaymentUseCase_Handle_Rejected(t *testing.T) {
 func TestPaymentUseCase_Handle_GatewayError(t *testing.T) {
 	pub := &mockPublisher{}
 	gateway := &mockPaymentGateway{err: errSimulado}
-	uc := NewPaymentUseCase(gateway, pub)
+	uc := NewPaymentUseCase(gateway, pub, &fakeEventLog{})
 
 	err := uc.Handle(context.Background(), paymentCommand("order-001"))
 	if err != nil {
@@ -111,7 +112,7 @@ func TestPaymentUseCase_Handle_GatewayError(t *testing.T) {
 func TestPaymentUseCase_Handle_Compensate_Success(t *testing.T) {
 	pub := &mockPublisher{}
 	gateway := &mockPaymentGateway{refunded: true}
-	uc := NewPaymentUseCase(gateway, pub)
+	uc := NewPaymentUseCase(gateway, pub, &fakeEventLog{})
 
 	event := paymentCommand("order-001")
 	event.EventType = domain.EventPaymentCompensate
@@ -137,7 +138,7 @@ func TestPaymentUseCase_Handle_Compensate_Success(t *testing.T) {
 
 func TestPaymentUseCase_Handle_Compensate_InvalidStatus(t *testing.T) {
 	pub := &mockPublisher{}
-	uc := NewPaymentUseCase(&mockPaymentGateway{}, pub)
+	uc := NewPaymentUseCase(&mockPaymentGateway{}, pub, &fakeEventLog{})
 
 	event := paymentCommand("order-001")
 	event.EventType = domain.EventPaymentCompensate
@@ -152,7 +153,7 @@ func TestPaymentUseCase_Handle_Compensate_InvalidStatus(t *testing.T) {
 
 func TestPaymentUseCase_Handle_Compensate_MissingTransactionID(t *testing.T) {
 	pub := &mockPublisher{}
-	uc := NewPaymentUseCase(&mockPaymentGateway{}, pub)
+	uc := NewPaymentUseCase(&mockPaymentGateway{}, pub, &fakeEventLog{})
 
 	event := paymentCommand("order-001")
 	event.EventType = domain.EventPaymentCompensate
@@ -168,7 +169,7 @@ func TestPaymentUseCase_Handle_Compensate_MissingTransactionID(t *testing.T) {
 func TestPaymentUseCase_Handle_Compensate_RefundFailed(t *testing.T) {
 	pub := &mockPublisher{}
 	gateway := &mockPaymentGateway{refunded: false}
-	uc := NewPaymentUseCase(gateway, pub)
+	uc := NewPaymentUseCase(gateway, pub, &fakeEventLog{})
 
 	event := paymentCommand("order-001")
 	event.EventType = domain.EventPaymentCompensate
@@ -188,7 +189,7 @@ func TestPaymentUseCase_Handle_Compensate_RefundFailed(t *testing.T) {
 func TestPaymentUseCase_Handle_Compensate_GatewayError(t *testing.T) {
 	pub := &mockPublisher{}
 	gateway := &mockPaymentGateway{refundErr: errSimulado}
-	uc := NewPaymentUseCase(gateway, pub)
+	uc := NewPaymentUseCase(gateway, pub, &fakeEventLog{})
 
 	event := paymentCommand("order-001")
 	event.EventType = domain.EventPaymentCompensate
@@ -206,5 +207,41 @@ func TestPaymentUseCase_Handle_Compensate_GatewayError(t *testing.T) {
 	}
 	if result.Metadata["erro"] == "" {
 		t.Error("metadata de erro deveria conter o motivo")
+	}
+}
+
+// --- journal de eventos (rastreabilidade) -----------------------------------------
+
+func TestPaymentUseCase_LogsRequestResponseAndResult(t *testing.T) {
+	pub := &mockPublisher{}
+	eventLog := &fakeEventLog{}
+	gateway := &mockPaymentGateway{approved: true, transactionID: "tx-1"}
+	uc := NewPaymentUseCase(gateway, pub, eventLog)
+
+	event := paymentCommand("order-001")
+	if err := uc.Handle(context.Background(), event); err != nil {
+		t.Fatalf("Handle retornou erro inesperado: %v", err)
+	}
+
+	// Esperado: IN, GATEWAY_REQUEST, GATEWAY_RESPONSE e OUT.
+	if len(eventLog.entries) != 4 {
+		t.Fatalf("esperado 4 registros no journal, obtidos %d", len(eventLog.entries))
+	}
+
+	if eventLog.entries[0].Direction != application.DirectionIn || eventLog.entries[0].EventType != domain.EventPaymentCommand {
+		t.Errorf("primeiro registro deveria ser IN do comando: %+v", eventLog.entries[0])
+	}
+	if eventLog.entries[1].Direction != application.DirectionGatewayRequest {
+		t.Errorf("segundo registro deveria ser GATEWAY_REQUEST: %+v", eventLog.entries[1])
+	}
+	if eventLog.entries[2].Direction != application.DirectionGatewayResponse {
+		t.Errorf("terceiro registro deveria ser GATEWAY_RESPONSE: %+v", eventLog.entries[2])
+	}
+	if eventLog.entries[3].Direction != application.DirectionOut || eventLog.entries[3].EventType != domain.EventPaymentResult {
+		t.Errorf("quarto registro deveria ser OUT do resultado: %+v", eventLog.entries[3])
+	}
+
+	if eventLog.entries[2].ResponsePayload == nil {
+		t.Error("response_payload do GATEWAY_RESPONSE não deveria ser nulo")
 	}
 }

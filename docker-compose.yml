@@ -1,4 +1,64 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: workers-kafka-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: saga
+      POSTGRES_PASSWORD: saga
+      POSTGRES_DB: saga
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U saga -d saga"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - saga-data:/var/lib/postgresql/data
+
+  migrations:
+    image: migrate/migrate:v4.18.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations
+    command:
+      - -path=/migrations
+      - -database=postgres://saga:saga@postgres:5432/saga?sslmode=disable
+      - up
+    restart: "no"
+
+  postgres-read:
+    image: postgres:16-alpine
+    container_name: workers-kafka-postgres-read
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_USER: saga
+      POSTGRES_PASSWORD: saga
+      POSTGRES_DB: saga_read
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U saga -d saga_read"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - saga-read-data:/var/lib/postgresql/data
+
+  migrations-read:
+    image: migrate/migrate:v4.18.1
+    depends_on:
+      postgres-read:
+        condition: service_healthy
+    volumes:
+      - ./migrations-read:/migrations
+    command:
+      - -path=/migrations
+      - -database=postgres://saga:saga@postgres-read:5432/saga_read?sslmode=disable
+      - up
+    restart: "no"
+
   kafka:
     image: apache/kafka:3.9.0
     container_name: workers-kafka-broker
@@ -51,8 +111,11 @@ services:
         TARGET: cmd/orchestrator
     environment:
       KAFKA_BROKERS: kafka:9092
+      DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
     depends_on:
       kafka-init:
+        condition: service_completed_successfully
+      migrations:
         condition: service_completed_successfully
 
   worker-payment:
@@ -62,8 +125,11 @@ services:
         TARGET: cmd/worker-payment
     environment:
       KAFKA_BROKERS: kafka:9092
+      DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
     depends_on:
       kafka-init:
+        condition: service_completed_successfully
+      migrations:
         condition: service_completed_successfully
 
   worker-inventory:
@@ -73,8 +139,11 @@ services:
         TARGET: cmd/worker-inventory
     environment:
       KAFKA_BROKERS: kafka:9092
+      DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
     depends_on:
       kafka-init:
+        condition: service_completed_successfully
+      migrations:
         condition: service_completed_successfully
 
   worker-notification:
@@ -84,8 +153,25 @@ services:
         TARGET: cmd/worker-notification
     environment:
       KAFKA_BROKERS: kafka:9092
+      DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
     depends_on:
       kafka-init:
+        condition: service_completed_successfully
+      migrations:
+        condition: service_completed_successfully
+
+  projector:
+    build:
+      context: .
+      args:
+        TARGET: cmd/projector
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      DATABASE_URL: postgres://saga:saga@postgres-read:5432/saga_read?sslmode=disable
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      migrations-read:
         condition: service_completed_successfully
 
   order-status:
@@ -111,3 +197,7 @@ services:
         condition: service_completed_successfully
     profiles:
       - tools
+
+volumes:
+  saga-data:
+  saga-read-data:

@@ -14,6 +14,9 @@ Arquitetura implementada neste projeto:
 - workers independentes para pagamento, estoque e notificação
 - compensação assíncrona de pagamento quando o estoque falha após aprovação
 - Kafka como barramento entre comandos, resultados e eventos finais
+- persistência do estado da saga em PostgreSQL (recuperação pós-restart)
+- journal de eventos com payloads de request/response dos gateways (rastreabilidade)
+- banco de leitura (read model) alimentado por projeção via Kafka (serviço `projector`)
 - execução local com Docker Compose
 - debug ponta a ponta com VS Code e logs correlacionados
 
@@ -32,6 +35,9 @@ Leituras mais úteis neste README:
 - estorno de pagamento assíncrono com `transaction_id` para compensação
 - Kafka como barramento de eventos entre os processos
 - eventos terminais publicados separadamente para auditoria
+- estado da saga persistido em PostgreSQL (banco de escrita) com recuperação após restart
+- todos os eventos gravados em `saga_events` (journal) com payloads de request/response
+- read model `order_views` no banco de leitura, projetado via Kafka pelo `projector`
 - cenários determinísticos por `order_id` para reproduzir falhas e retries
 - debug ponta a ponta com VS Code, Docker e logs correlacionados
 
@@ -77,6 +83,18 @@ make create-order ORDER_ID=order-inventory-retry-once-001
 make create-order ORDER_ID=order-notification-fail-001
 
 make create-order ORDER_ID=order-inventory-fail-001  # aciona compensação do pagamento quando aplicável
+```
+
+Para consultar a linha do tempo de um pedido no read model (banco de leitura):
+
+```bash
+make inspect ORDER_ID=order-001
+```
+
+Para consultar o journal completo de eventos com payloads (banco de escrita):
+
+```bash
+docker-compose exec postgres psql -U saga -d saga -c "SELECT id, component, direction, event_type, status_anterior, status_atual, payload, request_payload, response_payload FROM saga_events WHERE order_id='order-001' ORDER BY id;"
 ```
 
 ### Passo a passo
@@ -584,7 +602,10 @@ Serialização atual:
 - saga orquestrada, não coreografada
 - Kafka isolado em infraestrutura
 - workers independentes por etapa
-- estado do orquestrador mantido em memória nesta fase
+- estado do orquestrador persistido em PostgreSQL (banco de escrita)
+- journal de eventos (`saga_events`) para rastreabilidade com payloads de request/response
+- banco de leitura com read model (`order_views`) alimentado por projeção via Kafka (CQRS)
+- garantia at-least-once + dedup por `event_id`; Outbox Pattern previsto para a Fase 3
 - tópicos separados por etapa
 - eventos terminais enviados para `orders.status`
 - debug orientado por correlação de logs e cenários dirigidos por `order_id`
@@ -597,28 +618,32 @@ Incluído nesta fase:
 - contratos de evento
 - workers assíncronos
 - simuladores externos
+- persistência do estado da saga e journal de eventos (PostgreSQL)
+- read model no banco de leitura com serviço `projector`
+- migrations com `golang-migrate` via Docker
 - Docker para execução local
 - debug ponta a ponta no VS Code
 
 ## O Que Este Projeto Ainda Não Faz
 
-- persistência do estado do orquestrador após reinício
-- testes automatizados do fluxo
+- Outbox Pattern, DLQ e idempotência completa (Fase 3)
+- API REST de consulta de pedido (o read model `order_views` já está pronto para isso)
 - observabilidade formal com tracing e métricas
-- tratamento de produção com políticas avançadas de retry, DLQ ou idempotência persistida
+- tratamento de produção com políticas avançadas de retry
 
 Fora de escopo nesta fase:
 
-- testes automatizados
-- banco de dados
+- Outbox Pattern / DLQ / idempotência persistida
+- API REST
 - observabilidade formal
-- integração automatizada
+- integração automatizada (testcontainers)
 - concorrência explícita com goroutines
 
 ## Próximos Passos Naturais
 
-- adicionar testes unitários e de integração
-- persistir o estado do orquestrador
+- Fase 3: Outbox Pattern, DLQ e idempotência completa por `event_id`
+- API REST de consulta de pedido lendo o read model `order_views`
+- testes de integração com testcontainers (Kafka + Postgres reais)
 - introduzir observabilidade estruturada
 - comparar versão sequencial com versão concorrente
 - evoluir o contrato de mensagens conforme novos cenários# workers-kafka

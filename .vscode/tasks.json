@@ -4,7 +4,7 @@
     {
       "label": "kafka: up",
       "type": "shell",
-      "command": "docker-compose up -d kafka kafka-init",
+      "command": "docker-compose up -d kafka kafka-init postgres migrations postgres-read migrations-read",
       "problemMatcher": [],
       "options": {
         "cwd": "${workspaceFolder}"
