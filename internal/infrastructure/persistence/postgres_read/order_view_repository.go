@@ -31,13 +31,23 @@ func (r *OrderViewRepository) ApplyEvent(ctx context.Context, event domain.Event
 	notificationError := event.Metadata["notification_error"] == "true"
 	paymentRefundFailed := event.Metadata["payment_refund_failed"] == "true"
 
+	// Estados terminais são FINAIS: o projector consome vários tópicos com um único
+	// consumer group e o Kafka não garante ordem entre tópicos — um evento atrasado
+	// (ex.: NOTIFICATION_RESULT chegando depois de ORDER_COMPLETED) não pode regredir
+	// o read model de COMPLETED/FAILED. Eventos atrasados seguem entrando na timeline.
 	const query = `
 INSERT INTO order_views (order_id, current_status, last_event_type, last_event_at, transaction_id, notification_error, payment_refund_failed, timeline, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, jsonb_build_array($8::jsonb), now())
 ON CONFLICT (order_id) DO UPDATE SET
-	current_status        = EXCLUDED.current_status,
-	last_event_type       = EXCLUDED.last_event_type,
-	last_event_at         = EXCLUDED.last_event_at,
+	current_status        = CASE WHEN order_views.current_status IN ('COMPLETED', 'FAILED')
+	                             THEN order_views.current_status
+	                             ELSE EXCLUDED.current_status END,
+	last_event_type       = CASE WHEN order_views.current_status IN ('COMPLETED', 'FAILED')
+	                             THEN order_views.last_event_type
+	                             ELSE EXCLUDED.last_event_type END,
+	last_event_at         = CASE WHEN order_views.current_status IN ('COMPLETED', 'FAILED')
+	                             THEN order_views.last_event_at
+	                             ELSE EXCLUDED.last_event_at END,
 	transaction_id        = CASE WHEN EXCLUDED.transaction_id <> '' THEN EXCLUDED.transaction_id ELSE order_views.transaction_id END,
 	notification_error    = order_views.notification_error OR EXCLUDED.notification_error,
 	payment_refund_failed = order_views.payment_refund_failed OR EXCLUDED.payment_refund_failed,
