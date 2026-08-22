@@ -1,0 +1,14 @@
+# Ambiente / segredos — nunca versionar .env real
+.env
+.env.*
+!.env.example
+
+# Builds e artefatos
+bin/
+dist/
+tmp/
+*.log
+
+# Ferramentas
+.vscode/
+.idea/

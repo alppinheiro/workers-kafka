@@ -68,10 +68,26 @@ Este repositório demonstra:
 ## Quick Start
 
 ```bash
+cp .env.example .env   # (opcional) configuração por ambiente — veja abaixo
 make up
 make create-order ORDER_ID=order-001
 make logs
 ```
+
+### Configuração por ambiente (12-factor)
+
+Toda configuração vem de **variáveis de ambiente** (o código não tem `if ambiente`):
+
+- **`docker-compose`** usa a rede interna do compose (`kafka:9092`, `postgres:5432`) e lê
+  do `.env` apenas credenciais, portas mapeadas e tuning (`POSTGRES_*`, `*PORT`,
+  `SAGA_WORKERS`, `KAFKA_AUTO_CREATE_TOPICS_ENABLE`, ...).
+- **`go run` no host** (load-generator, testes, benchmark) usa as portas mapeadas no host
+  (`localhost:9094`, `localhost:5433`) — faça `source .env` antes.
+- **Produção (Kubernetes)** usará `ConfigMap`/`Secret` via Helm (próximas fases) — o mesmo
+  binário, sem recompilação.
+
+O `.env.example` documenta todas as variáveis; o `.env` real é ignorado pelo git
+(nunca versionar credenciais).
 
 Para validar o projeto localmente:
 

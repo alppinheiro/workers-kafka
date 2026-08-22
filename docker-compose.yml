@@ -1,15 +1,32 @@
+# Configuração por ambiente (12-factor): os valores padrão já funcionam com a
+# rede interna do compose; credenciais, portas e tuning vêm do arquivo `.env`
+# (veja `.env.example`). Para rodar no host (`go run`), use as portas mapeadas
+# (ex.: KAFKA_BROKERS=localhost:9094, DATABASE_URL=...localhost:5433...).
+x-app-env: &app-env
+  KAFKA_BROKERS: kafka:9092
+  OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
+  SAGA_WORKERS: ${SAGA_WORKERS:-1}
+
+x-write-db-env: &write-db-env
+  <<: *app-env
+  DATABASE_URL: postgres://${POSTGRES_USER:-saga}:${POSTGRES_PASSWORD:-saga}@postgres:5432/${POSTGRES_DB:-saga}?sslmode=disable
+
+x-read-db-env: &read-db-env
+  <<: *app-env
+  DATABASE_URL: postgres://${POSTGRES_USER:-saga}:${POSTGRES_PASSWORD:-saga}@postgres-read:5432/${POSTGRES_READ_DB:-saga_read}?sslmode=disable
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: workers-kafka-postgres
     ports:
-      - "5433:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     environment:
-      POSTGRES_USER: saga
-      POSTGRES_PASSWORD: saga
-      POSTGRES_DB: saga
+      POSTGRES_USER: ${POSTGRES_USER:-saga}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-saga}
+      POSTGRES_DB: ${POSTGRES_DB:-saga}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U saga -d saga"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-saga} -d ${POSTGRES_DB:-saga}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -25,7 +42,7 @@ services:
       - ./migrations:/migrations
     command:
       - -path=/migrations
-      - -database=postgres://saga:saga@postgres:5432/saga?sslmode=disable
+      - -database=postgres://${POSTGRES_USER:-saga}:${POSTGRES_PASSWORD:-saga}@postgres:5432/${POSTGRES_DB:-saga}?sslmode=disable
       - up
     restart: "no"
 
@@ -33,13 +50,13 @@ services:
     image: postgres:16-alpine
     container_name: workers-kafka-postgres-read
     ports:
-      - "5434:5432"
+      - "${POSTGRES_READ_PORT:-5434}:5432"
     environment:
-      POSTGRES_USER: saga
-      POSTGRES_PASSWORD: saga
-      POSTGRES_DB: saga_read
+      POSTGRES_USER: ${POSTGRES_USER:-saga}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-saga}
+      POSTGRES_DB: ${POSTGRES_READ_DB:-saga_read}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U saga -d saga_read"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-saga} -d ${POSTGRES_READ_DB:-saga_read}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -55,7 +72,7 @@ services:
       - ./migrations-read:/migrations
     command:
       - -path=/migrations
-      - -database=postgres://saga:saga@postgres-read:5432/saga_read?sslmode=disable
+      - -database=postgres://${POSTGRES_USER:-saga}:${POSTGRES_PASSWORD:-saga}@postgres-read:5432/${POSTGRES_READ_DB:-saga_read}?sslmode=disable
       - up
     restart: "no"
 
@@ -63,7 +80,7 @@ services:
     image: jaegertracing/jaeger:2.9.0
     container_name: workers-kafka-jaeger
     ports:
-      - "16686:16686"
+      - "${JAEGER_UI_PORT:-16686}:16686"
       - "4317:4317"
       - "4318:4318"
     environment:
@@ -73,7 +90,7 @@ services:
     image: apache/kafka:3.9.0
     container_name: workers-kafka-broker
     ports:
-      - "9094:9094"
+      - "${KAFKA_PORT:-9094}:9094"
     environment:
       KAFKA_NODE_ID: "1"
       KAFKA_PROCESS_ROLES: broker,controller
@@ -83,7 +100,7 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "${KAFKA_AUTO_CREATE_TOPICS_ENABLE:-true}"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
       KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: "1"
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
@@ -130,11 +147,7 @@ services:
       args:
         TARGET: cmd/orchestrator
     restart: unless-stopped
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
-      SAGA_WORKERS: ${SAGA_WORKERS:-1}
-      DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
+    environment: *write-db-env
     depends_on:
       kafka-init:
         condition: service_completed_successfully
@@ -147,11 +160,7 @@ services:
       args:
         TARGET: cmd/worker-payment
     restart: unless-stopped
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
-      SAGA_WORKERS: ${SAGA_WORKERS:-1}
-      DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
+    environment: *write-db-env
     depends_on:
       kafka-init:
         condition: service_completed_successfully
@@ -164,11 +173,7 @@ services:
       args:
         TARGET: cmd/worker-inventory
     restart: unless-stopped
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
-      SAGA_WORKERS: ${SAGA_WORKERS:-1}
-      DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
+    environment: *write-db-env
     depends_on:
       kafka-init:
         condition: service_completed_successfully
@@ -181,11 +186,7 @@ services:
       args:
         TARGET: cmd/worker-notification
     restart: unless-stopped
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
-      SAGA_WORKERS: ${SAGA_WORKERS:-1}
-      DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
+    environment: *write-db-env
     depends_on:
       kafka-init:
         condition: service_completed_successfully
@@ -198,11 +199,7 @@ services:
       args:
         TARGET: cmd/projector
     restart: unless-stopped
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
-      SAGA_WORKERS: ${SAGA_WORKERS:-1}
-      DATABASE_URL: postgres://saga:saga@postgres-read:5432/saga_read?sslmode=disable
+    environment: *read-db-env
     depends_on:
       kafka-init:
         condition: service_completed_successfully
@@ -215,11 +212,7 @@ services:
       args:
         TARGET: cmd/outbox-relay
     restart: unless-stopped
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
-      SAGA_WORKERS: ${SAGA_WORKERS:-1}
-      DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
+    environment: *write-db-env
     depends_on:
       kafka-init:
         condition: service_completed_successfully
@@ -232,9 +225,7 @@ services:
       args:
         TARGET: cmd/metrics-exporter
     restart: unless-stopped
-    environment:
-      DATABASE_URL: postgres://saga:saga@postgres:5432/saga?sslmode=disable
-      KAFKA_BROKERS: kafka:9092
+    environment: *write-db-env
     depends_on:
       migrations:
         condition: service_completed_successfully
@@ -243,7 +234,7 @@ services:
     image: prom/prometheus:v2.53.0
     container_name: workers-kafka-prometheus
     ports:
-      - "9090:9090"
+      - "${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/rules.yml:/etc/prometheus/rules.yml:ro
@@ -255,9 +246,9 @@ services:
     image: grafana/grafana:11.2.0
     container_name: workers-kafka-grafana
     ports:
-      - "3000:3000"
+      - "${GRAFANA_PORT:-3000}:3000"
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
@@ -270,10 +261,7 @@ services:
       args:
         TARGET: cmd/order-status
     restart: unless-stopped
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
-      SAGA_WORKERS: ${SAGA_WORKERS:-1}
+    environment: *app-env
     depends_on:
       kafka-init:
         condition: service_completed_successfully
@@ -283,10 +271,7 @@ services:
       context: .
       args:
         TARGET: cmd/create-order
-    environment:
-      KAFKA_BROKERS: kafka:9092
-      OTEL_EXPORTER_OTLP_ENDPOINT: jaeger:4318
-      SAGA_WORKERS: ${SAGA_WORKERS:-1}
+    environment: *app-env
     depends_on:
       kafka-init:
         condition: service_completed_successfully

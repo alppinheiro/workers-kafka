@@ -5,3 +5,6 @@ bin
 dist
 tmp
 *.log
+.env
+.env.*
+!.env.example
