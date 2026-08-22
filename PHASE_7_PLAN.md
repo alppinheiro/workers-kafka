@@ -182,6 +182,22 @@ com tópico recriado e o **watchdog anti-stall reconecta o reader sozinho** em a
 - `make check` + `make integration` verdes.
 - Runbook operacional no README (subir stack, monitorar, recuperar DLQ).
 
+**✅ Resultado (21/08/2026):**
+- **Benchmark A/B/C** (3.000 pedidos / 80 s, tudo otimizado): A = 2.339 COMPLETED,
+  B = 2.257, C = 2.305 — **as 3 configurações drenam 100% (outbox = 0)**; throughput
+  ~258–261 ev/s. O pipeline deixou de ser o gargalo nesse volume (pré-7.1: 0 concluídos,
+  2.012 presos na fila). Detalhes em `BENCHMARK.md`.
+- **Resiliência validada** (4 testes com a stack real):
+  - **R1** restart do orquestrador no meio do fluxo → 1.000/1.000 sagas drenadas (0 perdidas);
+  - **R2** tópico `orders.payment` deletado no meio do fluxo → consumers não morrem
+    (`UnknownTopicOrPartition` = retry; watchdog reconecta);
+  - **R3** relay duplicado (2 relays, 1.500 pedidos) → 0 duplicatas na outbox e **0 event_id
+    duplicado no tópico** (`FOR UPDATE SKIP LOCKED`);
+  - **R4** worker-payment caído 20 s → sagas em espera sem corromper; 800/800 drenadas ao religar.
+- **`make check` e `make integration` verdes**; **runbook operacional** adicionado ao README
+  (subir stack, monitorar, recuperar DLQ, diagnóstico por pedido, procedimentos de resiliência).
+- Procedimento de benchmark versionado em `scripts/benchmark.sh`.
+
 ## 4. Ordem de execução e critérios de pronto
 
 | Etapa | Risco | Dependência | DoD |
@@ -189,8 +205,8 @@ com tópico recriado e o **watchdog anti-stall reconecta o reader sozinho** em a
 | 7.1 relay | baixo | — | ✅ **feito** — relay ~485 ev/s |
 | **7.2 commit em lote + resiliência** | médio | 7.1 | orquestrador ≥ 300 ev/s; sobrevive a tópico recriado |
 | 7.3 rastreabilidade | baixo | 7.1 | auditoria < 50 ms; alerta DLQ; gauge correto |
-| 7.4 transação atômica | alto | 7.2 | consistência; Testcontainers verdes |
-| 7.5 validação produção | médio | 7.2–7.4 | benchmark A/B/C + resiliência + runbook |
+| 7.4 transação atômica | alto | 7.2 | consistência; Testcontainers verdes | ✅ **feito** — estado+journal+outbox em 1 `pgx.Tx` |
+| 7.5 validação produção | médio | 7.2–7.4 | benchmark A/B/C + resiliência + runbook | ✅ **feito** — ver `BENCHMARK.md` (3/3 drenam 100%, outbox 0) e README (runbook) |
 
 **Recomendação:** implementar **7.2** agora (maior ganho de performance restante + resiliência),
 depois **7.3** (rastreabilidade — requisito de produção), **7.4** (consistência) e **7.5** (validação).

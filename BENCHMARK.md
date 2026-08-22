@@ -151,6 +151,54 @@ bursts intermitentes) → **Etapa 7.2 (commit em lote) e investigar `kafka-go Gr
 
 
 
+## Benchmark — Etapa 7.5 (7.1–7.4 aplicados — validação final de produção)
+
+> Medido em 21/08/2026 com todas as otimizações (relay ~485 ev/s, commit em lote,
+> watchdog anti-stall, transação atômica). Fonte de verdade: estado das sagas no Postgres.
+
+### Método
+
+1. Reset de bancos (`TRUNCATE sagas, saga_events, outbox, order_views, processed_events`).
+2. Reset de consumer groups (`--to-latest`).
+3. Publicar **3.000 pedidos** (`load-generator -count 3000 -batch 500`).
+4. Janela de **80 s**; contar o estado das sagas + outbox pendente.
+
+### Resultados (3.000 pedidos, 80 s)
+
+| Cenário | Config | COMPLETED | FAILED | Total | Outbox pendente | rate[60s] |
+|---|---|---|---|---|---|---|
+| **A** | 1 réplica, `SAGA_WORKERS=1`, 1 relay | **2.339** | 661 | 3.000 | **0** | 258 ev/s |
+| **B** | 1 réplica, `SAGA_WORKERS=3`, 1 relay | 2.257 | 743 | 3.000 | **0** | 261 ev/s |
+| **C** | 3 réplicas, `SAGA_WORKERS=1`, **2 relays** | 2.305 | 695 | 3.000 | **0** | —¹ |
+
+¹ Janela pós-drenagem (a drenagem do C terminou antes da janela de medição → rate 0).
+
+### Leitura
+
+- **As 3 configurações drenam 3.000 pedidos em ~80 s** (COMPLETED + FAILED = 3.000 e
+  **outbox = 0** em todas). O pipeline **deixou de ser o gargalo nesse volume**: no
+  pré-7.1 (A6), o mesmo fluxo deixava 2.012 pedidos presos na fila e 0 concluídos.
+- `SAGA_WORKERS` intra-instância **não muda throughput** (A ≈ B): os round-trips de
+  Postgres/Kafka dominam (confirmando a Fase 5).
+- Escala horizontal (C) só mostra vantagem em volumes **acima de 3.000** — para
+  demonstrá-la, subir o volume e/ou a taxa de ingestão.
+
+### Resiliência — validada (Etapa 7.5)
+
+| # | Teste | Procedimento | Resultado |
+|---|---|---|---|
+| **R1** | Restart do orquestrador no meio do fluxo | `docker-compose restart orchestrator` após publicar 1.000 pedidos | **1.000/1.000 sagas drenadas** (775 COMPLETED + 225 FAILED); outbox = 0 — nenhuma saga perdida |
+| **R2** | Tópico deletado no meio do fluxo | deletar `orders.payment` durante o processamento (auto-recreate pelo broker) | **Consumers não morrem** (`UnknownTopicOrPartition` = retry; watchdog reconecta). Perda inerente da deleção: 64 sagas em compensação aguardam mensagens perdidas |
+| **R3** | Relay duplicado (2 relays) | `--scale outbox-relay=2` + carga de 1.500 pedidos | **1.500/1.500 drenadas**; **0 duplicatas na outbox** e **0 event_id duplicado no tópico** (`FOR UPDATE SKIP LOCKED`) |
+| **R4** | Worker-payment caído | `docker-compose stop worker-payment` por 20 s no meio do fluxo | Sagas ficam em espera sem corromper; **800/800 drenadas** após religar |
+
+> Nota sobre o R2: a deleção de tópico é uma ação destrutiva de administrador — a
+> perda das mensagens em voo é inerente ao Kafka. O teste prova que **o processo
+> sobrevive**; para alterar partições sem perda, usar `--alter` (o watchdog reconecta
+> o reader no stall conhecido do kafka-go).
+
+
+
 ## Como reproduzir
 
 ```bash

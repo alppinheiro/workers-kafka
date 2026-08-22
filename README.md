@@ -748,6 +748,75 @@ docker-compose exec postgres psql -U saga -d saga -c \
   "SELECT current_status, count(*) FROM sagas WHERE order_id LIKE 'load%' GROUP BY 1 ORDER BY 2 DESC;"
 ```
 
+## Runbook Operacional
+
+### Subir a stack
+
+```bash
+make up                          # sobe infra + pipeline em background
+make create-order ORDER_ID=order-001   # publica um pedido de teste
+make logs                        # segue os logs da stack
+```
+
+### Monitorar
+
+| Ferramenta | URL | O quê |
+|---|---|---|
+| Grafana | http://localhost:3000 (`admin`/`admin`) | Dashboard **"Saga - Visão Geral"** (throughput, backlog, DLQ, outbox) |
+| Prometheus | http://localhost:9090 | Métricas + **alertas** `SagaDLQGrowth` e `SagaConsumerStalled` |
+| Jaeger | http://localhost:16686 | Traces distribuídos por `order_id` (W3C traceparent) |
+| Postgres (escrita) | `localhost:5433` (`saga`/`saga`) | `sagas`, `saga_events` (journal), `outbox` |
+| Postgres (leitura) | `localhost:5434` | `order_views` (read model) |
+
+Lag por consumer group (fila do pipeline):
+
+```bash
+docker-compose exec kafka /bin/sh -c \
+  '/opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group orchestrator'
+```
+
+### Recuperar DLQ
+
+Mensagens com erro definitivo vão para `orders.<etapa>.dlq`. Para inspecionar e reprocessar:
+
+```bash
+# Ver as mensagens da DLQ de pagamento
+docker-compose exec kafka /bin/sh -c \
+  '/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic orders.payment.dlq --from-beginning --max-messages 5'
+
+# Reproduzir de volta para o tópico original (reprocessamento)
+docker-compose exec kafka /bin/sh -c \
+  '/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic orders.payment.dlq --from-beginning | \
+   /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic orders.payment'
+```
+
+> A idempotência por `event_id` torna o reprocessamento seguro: eventos já registrados
+> no journal são ignorados na reentrega (at-least-once sem duplicação de efeito).
+
+### Diagnóstico rápido de um pedido
+
+```bash
+# Onde o pedido está no fluxo
+docker-compose exec postgres psql -U saga -d saga -c \
+  "SELECT order_id, current_status, retry_count, transaction_id, updated_at FROM sagas WHERE order_id='order-001'"
+
+# O "trace de negócio" completo (journal)
+docker-compose exec postgres psql -U saga -d saga -c \
+  "SELECT component, direction, event_type, status_anterior, status_atual, created_at FROM saga_events WHERE order_id='order-001' ORDER BY id"
+
+# Read model (banco de leitura)
+make inspect ORDER_ID=order-001
+```
+
+### Procedimentos de resiliência (validados na Etapa 7.5)
+
+| Cenário | Procedimento | Garantia |
+|---|---|---|
+| Reinício no meio do fluxo | `docker-compose restart orchestrator` (ou qualquer worker) | Saga continua de onde parou (estado persistido) |
+| Tópico recriado/deletado | deletar e recriar um tópico | Consumer **não morre**: trata `UnknownTopicOrPartition` como retry e o watchdog anti-stall reconecta o reader em ≤45 s |
+| Relay duplicado | `docker-compose up -d --scale outbox-relay=2` | `FOR UPDATE SKIP LOCKED` (claims) garante que cada evento da outbox é publicado 1× |
+| Worker caído | `docker-compose stop worker-payment` | Sagas ficam em espera sem corromper; retomam ao religar o worker |
+
 ## Contrato da Mensagem
 
 Cada evento carrega, no mínimo:

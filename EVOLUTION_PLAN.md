@@ -126,6 +126,10 @@ fluxo contínuo + rastreabilidade total. Detalhes em `PHASE_7_PLAN.md`.
   - *Repositórios transacionais*: `DBTX` (contrato compartilhado por `*pgxpool.Pool` e `pgx.Tx`) + `NewSagaRepositoryTx`/`NewEventLogRepositoryTx`/`NewOutboxRepositoryTx`.
   - *Handlers atômicos*: orquestrador (`StartOrder`, `HandleResult`) e workers (pagamento/estoque/notificação) processam cada evento dentro de uma única transação — estado, journal e outbox são gravados juntos ou nenhum é gravado.
   - *Testes de consistência*: `TestUnitOfWork_AtomicCommit` (as 3 tabelas persistem juntas) e `TestUnitOfWork_AtomicRollback` (erro no bloco desfaz tudo) + versão Testcontainers (`TestUnitOfWorkRollbackWithContainer`); `make check` e `make integration` verdes.
+- [x] **7.5 Validação final de produção (DoD)**:
+  - *Benchmark A/B/C*: as 3 configurações drenam 3.000 pedidos em ~80 s (outbox=0); throughput ~258–261 ev/s — o pipeline deixou de ser o gargalo nesse volume. Detalhes em `BENCHMARK.md`.
+  - *Resiliência*: R1 restart orquestrador (1.000/1.000 sagas drenadas), R2 tópico deletado (consumers sobrevivem), R3 relay duplicado (0 duplicatas — SKIP LOCKED), R4 worker caído (800/800 retomadas).
+  - *Runbook operacional* no README + `scripts/benchmark.sh`; `make check` e `make integration` verdes.
 
 ---
 
