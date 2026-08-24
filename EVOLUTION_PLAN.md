@@ -148,6 +148,23 @@ unitários), `integration` (Testcontainers), `smoke` (e2e via docker-compose) e 
 
 ---
 
+## ☸️ Fase 9: Kubernetes local (kind + Helm + KEDA) (planejada)
+
+**Objetivo:** rodar a stack em **Kubernetes local (kind)** — Helm chart (`deploy/helm/order-saga`),
+Kafka via **Strimzi** (CRD `Kafka`/`KafkaTopic`), Postgres no cluster, **KEDA** escalando por
+consumer lag, probes `/healthz` + resources, migrations como Job e smoke end-to-end. Valida o
+design a custo zero antes da cloud (Fase 10). Detalhes em `PHASE_9_PLAN.md`.
+
+- [ ] **9.1** Cluster kind (2 nodes) + `Makefile` `k8s-up/down/logs/smoke`.
+- [ ] **9.2** Helm chart `order-saga` (Deployments/Services/ConfigMap/Secret/values por env).
+- [ ] **9.3** Infra no cluster: Strimzi (Kafka + tópicos 4 partições) + Postgres + migrations Job.
+- [ ] **9.4** Probes `/healthz` (mudança em `metrics.Serve`) + resources por serviço.
+- [ ] **9.5** KEDA `ScaledObject` por lag (min 1 / max 3) — validar escala 1→3 sob carga.
+- [ ] **9.6** Smoke no cluster: saga `k8s-smoke-*` até `COMPLETED/FAILED`.
+- [ ] **9.7** Observabilidade: kube-prometheus-stack + dashboard "Saga - Visão Geral".
+
+---
+
 ## 📈 Critérios de Sucesso (Definition of Done)
 
 1. **Resiliência:** O orquestrador pode ser reiniciado no meio de uma saga e ela deve continuar de onde parou.
