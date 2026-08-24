@@ -92,12 +92,12 @@ do `.env.example`/compose — sem recompilar.
 
 | Tema | Escolha | Por quê |
 |---|---|---|
-| Kafka no K8s | **Strimzi** (operador + CRD) | experiência com operadores/CRDs; tópicos IaC; custo zero |
-| Postgres | bitnami chart ou Deployment+PVC | grátis; RDS na Fase 10 |
+| Kafka no K8s | **apache/kafka (manifesto local)** — fallback do Strimzi | Strimzi (quay.io) e bitnami (Docker Hub) bloqueados neste ambiente; `apache/kafka:3.9.0` é a mesma imagem do compose |
+| Postgres | Deployment + PVC (postgres:16-alpine) | grátis; RDS na Fase 10 |
 | Probes | `/healthz` no server de métricas + TCP | serviços não têm HTTP health hoje |
 | Autoscaling | **KEDA** trigger `kafka` (lag) | mesma métrica do autoscaler local |
 | Deploy | **Helm**; ArgoCD fica para a Fase 10 | Helm primeiro (fundação); GitOps como bônus |
-| Observabilidade | kube-prometheus-stack | padrão de mercado; dashboard já existe |
+| Observabilidade | kube-prometheus-stack **adiado** | recursos do Colima (4 GB) — fazer na Fase 10/cloud |
 
 ## 5. Ordem de execução e critérios de pronto
 
@@ -135,3 +135,30 @@ do `.env.example`/compose — sem recompilar.
 3. `Makefile`: `k8s-up/down/logs/smoke`.
 4. Código: endpoint `/healthz` no server de métricas (mudança pequena, validada pelo CI).
 5. `EVOLUTION_PLAN.md`/README: Fase 9 registrada + runbook K8s.
+
+## 9. Resultado (24/08/2026) — pipeline rodando no Kubernetes
+
+**✅ Validado no cluster kind local (`order-saga`):**
+
+| Etapa | DoD | Resultado |
+|---|---|---|
+| 9.1 kind + make | nodes Ready | ✅ `k8s-up/down/logs/smoke` funcionando |
+| 9.2 Helm chart | `helm template` + Deployments Up | ✅ 8 Deployments + 7 Services + ConfigMap + Secret + Job migrations + 4 ScaledObjects |
+| 9.3 infra | Kafka Ready + tópicos + Postgres + migrations | ✅ Kafka `apache/kafka:3.9.0` (KRaft), **10 tópicos** (4 partições) via Job `kafka-init`, 2 Postgres, migrations **Completas** |
+| 9.4 probes | `/healthz` responde | ✅ liveness/readiness HTTP em `/healthz` (porta de métricas) |
+| 9.5 KEDA | escala por lag | ✅ orquestrador **1 → 3 réplicas** com lag > 200 (`266667m/200`); ScaledObjects READY/ACTIVE |
+| 9.6 smoke | saga terminal no cluster | ✅ `k8s-smoke`: `COMPLETED`, journal 20, outbox 0, read model `COMPLETED` |
+
+**Fallback documentado (Strimzi/bitnami → apache/kafka):**
+- Strimzi: o ambiente não confia no TLS do **quay.io** (x509 unknown authority — testado no host e no node). 
+- bitnami/kafka: Broadcom **não publica mais no Docker Hub** (`docker.io/bitnami/kafka:4.0.0-*` → not found).
+- Solução: **Deployment + Service + PVC com `apache/kafka:3.9.0`** (mesma imagem/config do docker-compose) e **Job `kafka-init`** criando os tópicos (IaC). Em cloud (Fase 10): MSK ou Strimzi/CRD.
+
+**Gotchas resolvidos durante a validação:**
+- **Advertised listener** do Kafka deve ser o **FQDN** (`kafka.order-saga.svc.cluster.local`) — senão o client (KEDA em outro namespace) não reconecta.
+- **Readiness do Kafka** por `tcpSocket` (o probe via `kafka-topics` criava deadlock: Service sem endpoints → client falha).
+- **Data dir** do Kafka é `/tmp/kraft-combined-logs` (config da imagem) — montar o PVC lá; memória do broker: limites 1 Gi (512 Mi causava **OOMKilled** sob carga).
+- **Portas de métricas** por serviço: projector=9105, metrics-exporter=9107, order-status **sem** metrics (sem probe) — a tabela inicial do chart estava errada.
+- Migrations do **banco de leitura** precisam de 2º container no Job + ConfigMap próprio.
+
+**Nota:** 9.7 (kube-prometheus-stack + dashboard) foi **adiado** — o Colima (4 GB) já opera no limite com kind + Kafka + Postgres + app + KEDA. As métricas já são expostas por pod (`/metrics`) e o dashboard "Saga - Visão Geral" pode ser importado na Fase 10 (cloud), onde há recursos.

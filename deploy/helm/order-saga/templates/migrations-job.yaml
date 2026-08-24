@@ -9,6 +9,7 @@ spec:
     spec:
       restartPolicy: OnFailure
       containers:
+        # Migrations do banco de escrita (sagas, saga_events, outbox)
         - name: migrations
           image: migrate/migrate:v4.18.1
           args:
@@ -24,7 +25,26 @@ spec:
           volumeMounts:
             - name: migrations
               mountPath: /migrations
+        # Migrations do banco de leitura (order_views, processed_events)
+        - name: migrations-read
+          image: migrate/migrate:v4.18.1
+          args:
+            - -path=/migrations
+            - -database=$(DATABASE_URL_READ)
+            - up
+          env:
+            - name: DATABASE_URL_READ
+              valueFrom:
+                secretKeyRef:
+                  name: order-saga-secrets
+                  key: DATABASE_URL_READ
+          volumeMounts:
+            - name: migrations-read
+              mountPath: /migrations
       volumes:
         - name: migrations
           configMap:
             name: order-saga-migrations
+        - name: migrations-read
+          configMap:
+            name: order-saga-migrations-read

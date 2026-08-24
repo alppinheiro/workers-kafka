@@ -1,0 +1,33 @@
+# bitnami/kafka (Kafka 4.0 KRaft) - single controller para o kind local.
+# Fallback do Strimzi: o ambiente local nao confia no TLS do quay.io
+# (ver PHASE_9_PLAN / deploy/k8s/strimzi-kafka.yaml).
+controller:
+  replicaCount: 1
+  persistence:
+    size: 2Gi
+  resources:
+    requests: { cpu: "100m", memory: "256Mi" }
+    limits: { cpu: "500m", memory: "512Mi" }
+
+# Cria os tópicos do pipeline (IaC) via provisioning Job.
+provisioning:
+  enabled: true
+  numPartitions: 4
+  replicationFactor: 1
+  topics:
+    - name: orders.created
+    - name: orders.payment
+    - name: orders.inventory
+    - name: orders.notification
+    - name: orders.status
+    # DLQs (1 partição)
+    - name: orders.created.dlq
+      numPartitions: 1
+    - name: orders.payment.dlq
+      numPartitions: 1
+    - name: orders.inventory.dlq
+      numPartitions: 1
+    - name: orders.notification.dlq
+      numPartitions: 1
+    - name: orders.status.dlq
+      numPartitions: 1

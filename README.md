@@ -835,6 +835,23 @@ make inspect ORDER_ID=order-001
 | Relay duplicado | `docker-compose up -d --scale outbox-relay=2` | `FOR UPDATE SKIP LOCKED` (claims) garante que cada evento da outbox é publicado 1× |
 | Worker caído | `docker-compose stop worker-payment` | Sagas ficam em espera sem corromper; retomam ao religar o worker |
 
+## Kubernetes local (Fase 9 — kind + Helm + KEDA)
+
+> A stack roda no Kubernetes local (kind). Detalhes em `PHASE_9_PLAN.md`.
+
+```bash
+# Pré-requisitos: kind, kubectl, helm (brew install kind kubernetes-cli helm)
+make k8s-up          # sobe cluster kind + Kafka + Postgres + Helm chart (e KEDA)
+make k8s-smoke ORDER_ID=k8s-smoke   # smoke e2e no cluster
+make k8s-logs SVC=orchestrator      # logs de um serviço
+make k8s-down        # derruba o cluster
+```
+
+> **Imagens**: para kind local, carregue as imagens locais
+> (`kind load docker-image ghcr.io/alppinheiro/workers-kafka-<svc>:latest` após `make rebuild`)
+> ou use as multi-arch do GHCR (`image.tag` por sha). O KEDA escala por consumer lag
+> (`lagThreshold=200`, min 1 / max 3) — mesma política do autoscaler local.
+
 ## Contrato da Mensagem
 
 Cada evento carrega, no mínimo:

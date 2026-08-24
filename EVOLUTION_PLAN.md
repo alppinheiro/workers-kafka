@@ -155,13 +155,13 @@ Kafka via **Strimzi** (CRD `Kafka`/`KafkaTopic`), Postgres no cluster, **KEDA** 
 consumer lag, probes `/healthz` + resources, migrations como Job e smoke end-to-end. Valida o
 design a custo zero antes da cloud (Fase 10). Detalhes em `PHASE_9_PLAN.md`.
 
-- [ ] **9.1** Cluster kind (2 nodes) + `Makefile` `k8s-up/down/logs/smoke`.
-- [ ] **9.2** Helm chart `order-saga` (Deployments/Services/ConfigMap/Secret/values por env).
-- [ ] **9.3** Infra no cluster: Strimzi (Kafka + tópicos 4 partições) + Postgres + migrations Job.
-- [ ] **9.4** Probes `/healthz` (mudança em `metrics.Serve`) + resources por serviço.
-- [ ] **9.5** KEDA `ScaledObject` por lag (min 1 / max 3) — validar escala 1→3 sob carga.
-- [ ] **9.6** Smoke no cluster: saga `k8s-smoke-*` até `COMPLETED/FAILED`.
-- [ ] **9.7** Observabilidade: kube-prometheus-stack + dashboard "Saga - Visão Geral".
+- [x] **9.1** Cluster kind (2 nodes) + `Makefile` `k8s-up/down/logs/smoke`.
+- [x] **9.2** Helm chart `order-saga` (Deployments/Services/ConfigMap/Secret/values por env).
+- [x] **9.3** Infra no cluster: Kafka (`apache/kafka` KRaft + Job `kafka-init` de tópicos) + Postgres + migrations Job.
+- [x] **9.4** Probes `/healthz` (mudança em `metrics.Serve`) + resources por serviço.
+- [x] **9.5** KEDA `ScaledObject` por lag (min 1 / max 3) — orquestrador escalou 1→3 sob carga.
+- [x] **9.6** Smoke no cluster: saga `k8s-smoke-*` até `COMPLETED/FAILED`.
+- [ ] **9.7** Observabilidade (kube-prometheus-stack + dashboard) — **adiado** (recursos do Colima 4 GB); fazer na Fase 10/cloud.
 
 ---
 

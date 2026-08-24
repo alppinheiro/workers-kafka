@@ -20,16 +20,17 @@ resources:
     memory: "128Mi"
 
 kafka:
-  # Service do Strimzi (KRaft): <cluster>-kafka-bootstrap
-  brokers: "order-saga-kafka-kafka-bootstrap:9092"
+  # FQDN do Service (funciona de qualquer namespace - inclusive o do KEDA)
+  brokers: "kafka.order-saga.svc.cluster.local:9092"
 
 postgres:
   writeUrl: "postgres://saga:saga@order-saga-postgres:5432/saga?sslmode=disable"
   readUrl: "postgres://saga:saga@order-saga-postgres-read:5432/saga_read?sslmode=disable"
 
 otel:
-  # Ainda sem collector no cluster (9.7); o Init é lazy e não derruba o serviço.
-  endpoint: "http://order-saga-otel:4318"
+  # Sem collector no cluster ainda (9.7). Com WithInsecure(), o endpoint é host:port
+  # (sem scheme) — evita o erro de parse do exporter OTLP.
+  endpoint: "order-saga-otel:4318"
 
 sagaWorkers: 1
 
@@ -71,7 +72,6 @@ services:
       topic: orders.notification
   - name: order-status
     image: workers-kafka-order-status
-    metricsPort: 9105
     db: none
   - name: outbox-relay
     image: workers-kafka-outbox-relay
@@ -79,8 +79,9 @@ services:
     db: write
   - name: projector
     image: workers-kafka-projector
-    metricsPort: 9107
+    metricsPort: 9105
     db: read
   - name: metrics-exporter
     image: workers-kafka-metrics-exporter
+    metricsPort: 9107
     db: write

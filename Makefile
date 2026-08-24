@@ -98,20 +98,21 @@ K8S_IMG_TAG ?= latest
 k8s-up:
 	kind create cluster --config deploy/k8s/kind-config.yaml
 	kubectl create namespace $(K8S_NAMESPACE) 2>/dev/null || true
-	# Operadores: Strimzi (Kafka) + KEDA (autoscaling)
-	helm repo add strimzi https://strimzi.io/charts/ 2>/dev/null || true
+	# Operador KEDA (autoscaling por lag)
 	helm repo add kedacore https://kedacore.github.io/charts 2>/dev/null || true
-	helm repo update strimzi kedacore
-	helm upgrade --install strimzi-operator strimzi/strimzi-kafka-operator -n $(K8S_NAMESPACE) --wait
+	helm repo update kedacore
 	helm upgrade --install keda kedacore/keda --namespace keda --create-namespace --wait
-	# Infra: Postgres (escrita/leitura) + Kafka (Strimzi, tópicos IaC)
+	# Infra: Postgres (escrita/leitura) + Kafka (apache/kafka KRaft, tópicos via Job kafka-init)
 	kubectl apply -f deploy/k8s/postgres.yaml
-	kubectl apply -f deploy/k8s/strimzi-kafka.yaml
-	kubectl wait --for=condition=Ready kafka/order-saga-kafka -n $(K8S_NAMESPACE) --timeout=240s
+	kubectl apply -f deploy/k8s/kafka.yaml
 	kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=postgres -n $(K8S_NAMESPACE) --timeout=120s
 	kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=postgres-read -n $(K8S_NAMESPACE) --timeout=120s
-	# Migrations (ConfigMap com os .sql) + Helm chart da aplicação
+	kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=kafka -n $(K8S_NAMESPACE) --timeout=180s
+	kubectl wait --for=condition=complete job/kafka-init -n $(K8S_NAMESPACE) --timeout=120s
+	# Migrations (ConfigMaps com os .sql de escrita e leitura) + Helm chart da aplicação
 	kubectl create configmap order-saga-migrations --from-file=migrations/ -n $(K8S_NAMESPACE) \
+		-o yaml --dry-run=client | kubectl apply -f -
+	kubectl create configmap order-saga-migrations-read --from-file=migrations-read/ -n $(K8S_NAMESPACE) \
 		-o yaml --dry-run=client | kubectl apply -f -
 	helm upgrade --install order-saga deploy/helm/order-saga -n $(K8S_NAMESPACE) \
 		--set image.tag=$(K8S_IMG_TAG)
@@ -120,7 +121,6 @@ k8s-up:
 
 k8s-down:
 	helm uninstall order-saga -n $(K8S_NAMESPACE) 2>/dev/null || true
-	helm uninstall strimzi-operator -n $(K8S_NAMESPACE) 2>/dev/null || true
 	helm uninstall keda -n keda 2>/dev/null || true
 	kind delete cluster --name order-saga 2>/dev/null || true
 
