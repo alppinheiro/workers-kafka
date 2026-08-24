@@ -160,6 +160,7 @@ jobs:
           - order-status
           - metrics-exporter
           - create-order
+          - load-generator
     steps:
       - uses: actions/checkout@v4
 

@@ -1,0 +1,141 @@
+# Kafka via Strimzi (Fase 9) - cluster KRaft single-node + tópicos (IaC).
+# Requer o operador Strimzi instalado (helm install strimzi-operator strimzi/strimzi-kafka-operator).
+apiVersion: kafka.strimzi.io/v1beta2
+kind: Kafka
+metadata:
+  name: order-saga-kafka
+  namespace: order-saga
+spec:
+  kafka:
+    replicas: 1
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+    config:
+      auto.create.topics.enable: "false"
+      offsets.topic.replication.factor: 1
+      transaction.state.log.replication.factor: 1
+      transaction.state.log.min.isr: 1
+      default.replication.factor: 1
+      min.insync.replicas: 1
+    storage:
+      type: persistent-claim
+      size: 2Gi
+      deleteClaim: false
+  entityOperator:
+    topicOperator: {}
+    userOperator: {}
+---
+# Tópicos principais (4 partições - correlação por order_id)
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: orders.created
+  namespace: order-saga
+  labels:
+    strimzi.io/cluster: order-saga-kafka
+spec:
+  partitions: 4
+  replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: orders.payment
+  namespace: order-saga
+  labels:
+    strimzi.io/cluster: order-saga-kafka
+spec:
+  partitions: 4
+  replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: orders.inventory
+  namespace: order-saga
+  labels:
+    strimzi.io/cluster: order-saga-kafka
+spec:
+  partitions: 4
+  replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: orders.notification
+  namespace: order-saga
+  labels:
+    strimzi.io/cluster: order-saga-kafka
+spec:
+  partitions: 4
+  replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: orders.status
+  namespace: order-saga
+  labels:
+    strimzi.io/cluster: order-saga-kafka
+spec:
+  partitions: 4
+  replicas: 1
+---
+# Tópicos DLQ (1 partição)
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: orders.created.dlq
+  namespace: order-saga
+  labels:
+    strimzi.io/cluster: order-saga-kafka
+spec:
+  partitions: 1
+  replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: orders.payment.dlq
+  namespace: order-saga
+  labels:
+    strimzi.io/cluster: order-saga-kafka
+spec:
+  partitions: 1
+  replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: orders.inventory.dlq
+  namespace: order-saga
+  labels:
+    strimzi.io/cluster: order-saga-kafka
+spec:
+  partitions: 1
+  replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: orders.notification.dlq
+  namespace: order-saga
+  labels:
+    strimzi.io/cluster: order-saga-kafka
+spec:
+  partitions: 1
+  replicas: 1
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: orders.status.dlq
+  namespace: order-saga
+  labels:
+    strimzi.io/cluster: order-saga-kafka
+spec:
+  partitions: 1
+  replicas: 1

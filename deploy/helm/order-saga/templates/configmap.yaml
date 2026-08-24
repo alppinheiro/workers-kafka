@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-saga-config
+  namespace: {{ .Values.namespace }}
+data:
+  KAFKA_BROKERS: {{ .Values.kafka.brokers | quote }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.otel.endpoint | quote }}
+  SAGA_WORKERS: {{ .Values.sagaWorkers | quote }}

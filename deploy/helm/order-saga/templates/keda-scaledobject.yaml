@@ -1,0 +1,28 @@
+{{- range .Values.services }}
+{{- if .keda }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: order-saga-{{ .name }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    {{- include "order-saga.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: order-saga-{{ .name }}
+  minReplicaCount: {{ $.Values.keda.minReplicas }}
+  maxReplicaCount: {{ $.Values.keda.maxReplicas }}
+  cooldownPeriod: 60
+  pollingInterval: 15
+  triggers:
+    - type: kafka
+      metadata:
+        topic: {{ .keda.topic }}
+        bootstrapServers: {{ $.Values.kafka.brokers | quote }}
+        consumerGroup: {{ .keda.consumerGroup }}
+        lagThreshold: "{{ $.Values.keda.lagThreshold }}"
+{{- end }}
+{{- end }}

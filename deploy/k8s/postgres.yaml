@@ -1,0 +1,145 @@
+# Postgres de escrita e de leitura (Fase 9) - Deployment + Service + PVC.
+# Mesmos usuário/banco do docker-compose local (saga/saga).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: order-saga-postgres-pvc
+  namespace: order-saga
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-saga-postgres
+  namespace: order-saga
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: order-saga
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/part-of: order-saga
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - name: pg
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: saga
+            - name: POSTGRES_PASSWORD
+              value: saga
+            - name: POSTGRES_DB
+              value: saga
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "saga", "-d", "saga"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "50m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: order-saga-postgres-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-saga-postgres
+  namespace: order-saga
+spec:
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: pg
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: order-saga-postgres-read-pvc
+  namespace: order-saga
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-saga-postgres-read
+  namespace: order-saga
+  labels:
+    app.kubernetes.io/name: postgres-read
+    app.kubernetes.io/part-of: order-saga
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres-read
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres-read
+        app.kubernetes.io/part-of: order-saga
+    spec:
+      containers:
+        - name: postgres-read
+          image: postgres:16-alpine
+          ports:
+            - name: pg
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: saga
+            - name: POSTGRES_PASSWORD
+              value: saga
+            - name: POSTGRES_DB
+              value: saga_read
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "saga", "-d", "saga_read"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "50m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: order-saga-postgres-read-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-saga-postgres-read
+  namespace: order-saga
+spec:
+  selector:
+    app.kubernetes.io/name: postgres-read
+  ports:
+    - name: pg
+      port: 5432
+      targetPort: 5432

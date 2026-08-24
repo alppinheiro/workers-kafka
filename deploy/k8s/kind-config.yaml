@@ -1,0 +1,8 @@
+# Cluster kind para a Fase 9 (Kubernetes local).
+# 1 control-plane + 1 worker (mínimo p/ Colima 4 GB).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: order-saga
+nodes:
+  - role: control-plane
+  - role: worker

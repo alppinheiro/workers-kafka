@@ -2,7 +2,7 @@ COMPOSE ?= docker-compose
 ORDER_ID ?= order-001
 SERVICES = kafka kafka-init postgres migrations postgres-read migrations-read jaeger prometheus grafana orchestrator worker-payment worker-inventory worker-notification order-status projector outbox-relay metrics-exporter
 
-.PHONY: help fmt build vet test lint check ci integration up down logs ps create-order inspect rebuild
+.PHONY: help fmt build vet test lint check ci integration up down logs ps create-order inspect rebuild k8s-up k8s-down k8s-logs k8s-smoke
 
 help:
 	@echo "Targets disponiveis:"
@@ -21,6 +21,10 @@ help:
 	@echo "  make inspect       - consulta o read model (order_views) de um pedido no banco de leitura"
 	@echo "  make autoscale     - roda o autoscaler (lag -> docker-compose scale) no host"
 	@echo "  make rebuild       - rebuild da stack antes de subir"
+	@echo "  make k8s-up        - sobe cluster kind + Strimzi/Kafka + Postgres + Helm chart (Fase 9)"
+	@echo "  make k8s-down      - derruba o cluster kind e remove os recursos"
+	@echo "  make k8s-logs      - segue os logs de um deployment (SVC=<nome>)"
+	@echo "  make k8s-smoke     - smoke e2e no cluster (ORDER_ID=<id>) - scripts/k8s-smoke.sh"
 
 fmt:
 	gofmt -w .
@@ -83,3 +87,45 @@ autoscale:
 
 rebuild:
 	$(COMPOSE) build orchestrator worker-payment worker-inventory worker-notification order-status projector outbox-relay metrics-exporter create-order
+
+# ============================================================================
+# Fase 9 — Kubernetes local (kind + Helm + KEDA)
+# Requer: kind, kubectl, helm (brew install kind kubernetes-cli helm)
+# ============================================================================
+K8S_NAMESPACE ?= order-saga
+K8S_IMG_TAG ?= latest
+
+k8s-up:
+	kind create cluster --config deploy/k8s/kind-config.yaml
+	kubectl create namespace $(K8S_NAMESPACE) 2>/dev/null || true
+	# Operadores: Strimzi (Kafka) + KEDA (autoscaling)
+	helm repo add strimzi https://strimzi.io/charts/ 2>/dev/null || true
+	helm repo add kedacore https://kedacore.github.io/charts 2>/dev/null || true
+	helm repo update strimzi kedacore
+	helm upgrade --install strimzi-operator strimzi/strimzi-kafka-operator -n $(K8S_NAMESPACE) --wait
+	helm upgrade --install keda kedacore/keda --namespace keda --create-namespace --wait
+	# Infra: Postgres (escrita/leitura) + Kafka (Strimzi, tópicos IaC)
+	kubectl apply -f deploy/k8s/postgres.yaml
+	kubectl apply -f deploy/k8s/strimzi-kafka.yaml
+	kubectl wait --for=condition=Ready kafka/order-saga-kafka -n $(K8S_NAMESPACE) --timeout=240s
+	kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=postgres -n $(K8S_NAMESPACE) --timeout=120s
+	kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=postgres-read -n $(K8S_NAMESPACE) --timeout=120s
+	# Migrations (ConfigMap com os .sql) + Helm chart da aplicação
+	kubectl create configmap order-saga-migrations --from-file=migrations/ -n $(K8S_NAMESPACE) \
+		-o yaml --dry-run=client | kubectl apply -f -
+	helm upgrade --install order-saga deploy/helm/order-saga -n $(K8S_NAMESPACE) \
+		--set image.tag=$(K8S_IMG_TAG)
+	kubectl wait --for=condition=complete job/order-saga-migrations -n $(K8S_NAMESPACE) --timeout=120s
+	kubectl rollout status deployment -n $(K8S_NAMESPACE) --timeout=180s
+
+k8s-down:
+	helm uninstall order-saga -n $(K8S_NAMESPACE) 2>/dev/null || true
+	helm uninstall strimzi-operator -n $(K8S_NAMESPACE) 2>/dev/null || true
+	helm uninstall keda -n keda 2>/dev/null || true
+	kind delete cluster --name order-saga 2>/dev/null || true
+
+k8s-logs:
+	kubectl logs -f deployment/order-saga-$(SVC) -n $(K8S_NAMESPACE)
+
+k8s-smoke:
+	bash scripts/k8s-smoke.sh $(ORDER_ID)

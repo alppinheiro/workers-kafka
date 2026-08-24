@@ -144,10 +144,16 @@ func SetConsumerLag(group, topic string, n int64) {
 	consumerLag.WithLabelValues(group, topic).Set(float64(n))
 }
 
-// Serve inicia (em goroutine) um servidor HTTP com /metrics na porta indicada.
+// Serve inicia (em goroutine) um servidor HTTP com /metrics e /healthz na porta indicada.
+// O /healthz permite liveness/readiness probes no Kubernetes (Fase 9) sem expor outro
+// endpoint de health nos serviços.
 func Serve(addr string) {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
 	srv := &http.Server{Addr: addr, Handler: mux}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

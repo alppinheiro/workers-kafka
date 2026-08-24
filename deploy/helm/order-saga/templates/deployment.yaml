@@ -1,0 +1,63 @@
+{{- range .Values.services }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-saga-{{ .name }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    {{- include "order-saga.labels" . | nindent 4 }}
+spec:
+  replicas: {{ default $.Values.replicaCount .replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .name }}
+  template:
+    metadata:
+      labels:
+        {{- include "order-saga.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: {{ .name }}
+          image: "{{ $.Values.image.repository }}/{{ .image }}:{{ default $.Values.image.tag .tag }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          {{- if .metricsPort }}
+          ports:
+            - name: metrics
+              containerPort: {{ .metricsPort }}
+          {{- end }}
+          envFrom:
+            - configMapRef:
+                name: order-saga-config
+          {{- if eq .db "write" }}
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: order-saga-secrets
+                  key: DATABASE_URL
+          {{- else if eq .db "read" }}
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: order-saga-secrets
+                  key: DATABASE_URL_READ
+          {{- end }}
+          {{- if .metricsPort }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          {{- end }}
+          resources:
+            {{- toYaml $.Values.resources | nindent 12 }}
+{{- end }}

@@ -1,0 +1,19 @@
+{{- range .Values.services }}
+{{- if .metricsPort }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-saga-{{ .name }}
+  namespace: {{ $.Values.namespace }}
+  labels:
+    {{- include "order-saga.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ .name }}
+  ports:
+    - name: metrics
+      port: {{ .metricsPort }}
+      targetPort: {{ .metricsPort }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,86 @@
+# Valores do chart order-saga (Fase 9 - Kubernetes local / kind).
+# Imagens: publicadas pelo CI (Fase 8) em ghcr.io/alppinheiro/workers-kafka-<svc>.
+
+namespace: order-saga
+
+image:
+  repository: ghcr.io/alppinheiro
+  pullPolicy: IfNotPresent
+  # tag: latest (por padrão usa a tag do values; sobrescreva em valores-prod por versão)
+  tag: latest
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: "50m"
+    memory: "32Mi"
+  limits:
+    cpu: "250m"
+    memory: "128Mi"
+
+kafka:
+  # Service do Strimzi (KRaft): <cluster>-kafka-bootstrap
+  brokers: "order-saga-kafka-kafka-bootstrap:9092"
+
+postgres:
+  writeUrl: "postgres://saga:saga@order-saga-postgres:5432/saga?sslmode=disable"
+  readUrl: "postgres://saga:saga@order-saga-postgres-read:5432/saga_read?sslmode=disable"
+
+otel:
+  # Ainda sem collector no cluster (9.7); o Init é lazy e não derruba o serviço.
+  endpoint: "http://order-saga-otel:4318"
+
+sagaWorkers: 1
+
+keda:
+  lagThreshold: 200
+  minReplicas: 1
+  maxReplicas: 3
+
+# Serviços da aplicação. db: write/read/none controla a DATABASE_URL injetada.
+# metricsPort é a porta do server /metrics + /healthz (probes). keda liga o ScaledObject.
+services:
+  - name: orchestrator
+    image: workers-kafka-orchestrator
+    metricsPort: 9101
+    db: write
+    keda:
+      consumerGroup: orchestrator
+      topic: orders.created
+  - name: worker-payment
+    image: workers-kafka-worker-payment
+    metricsPort: 9102
+    db: write
+    keda:
+      consumerGroup: worker-payment
+      topic: orders.payment
+  - name: worker-inventory
+    image: workers-kafka-worker-inventory
+    metricsPort: 9103
+    db: write
+    keda:
+      consumerGroup: worker-inventory
+      topic: orders.inventory
+  - name: worker-notification
+    image: workers-kafka-worker-notification
+    metricsPort: 9104
+    db: write
+    keda:
+      consumerGroup: worker-notification
+      topic: orders.notification
+  - name: order-status
+    image: workers-kafka-order-status
+    metricsPort: 9105
+    db: none
+  - name: outbox-relay
+    image: workers-kafka-outbox-relay
+    metricsPort: 9106
+    db: write
+  - name: projector
+    image: workers-kafka-projector
+    metricsPort: 9107
+    db: read
+  - name: metrics-exporter
+    image: workers-kafka-metrics-exporter
+    db: write
