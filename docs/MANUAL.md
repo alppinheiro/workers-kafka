@@ -315,6 +315,9 @@ estoque falhar após a aprovação).
 > (o projector consome do Kafka). Estado terminal (`COMPLETED`/`FAILED`) é **final** — um
 > evento atrasado entra na timeline, mas não regride o status (fix da Etapa 7.4/7.5).
 
+> 📖 **Aprofundamento:** cada tabela/coluna explicada (com SQL real, transação atômica,
+> fluxo da saga pelas tabelas e consultas de diagnóstico) em [`DATABASE.md`](DATABASE.md).
+
 ---
 
 ## 8. Simuladores e Cenários Determinísticos

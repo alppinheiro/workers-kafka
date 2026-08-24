@@ -25,6 +25,7 @@ Arquitetura implementada neste projeto:
 Leituras mais úteis neste README:
 
 - [Manual Completo do Projeto (arquitetura, comandos, troubleshooting)](docs/MANUAL.md)
+- [Banco de Dados — detalhamento (tabelas, colunas, por quê)](docs/DATABASE.md)
 - [Quick Start](#quick-start)
 - [Visão Geral da Arquitetura](#visão-geral-da-arquitetura)
 - [Casos Possíveis na Aplicação](#casos-possíveis-na-aplicação)
