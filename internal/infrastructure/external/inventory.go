@@ -3,6 +3,7 @@ package external
 import (
 	"context"
 	"math/rand"
+	"sync"
 	"time"
 )
 
@@ -11,6 +12,8 @@ type InventorySimulator struct {
 	reservationRate float64
 	attempts        map[string]int
 	rng             *rand.Rand
+	// mu protege attempts/rng (goroutines concorrentes com SAGA_WORKERS > 1).
+	mu sync.Mutex
 }
 
 // NewInventorySimulator cria o simulador com a taxa de sucesso de reserva desejada (entre 0 e 1).
@@ -24,6 +27,9 @@ func NewInventorySimulator(reservationRate float64) *InventorySimulator {
 
 // Reserve simula a reserva de estoque para o pedido informado.
 func (i *InventorySimulator) Reserve(_ context.Context, orderID string) (bool, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
 	i.attempts[orderID]++
 	attempt := i.attempts[orderID]
 

@@ -3,6 +3,7 @@ package external
 import (
 	"context"
 	"math/rand"
+	"sync"
 	"time"
 )
 
@@ -11,6 +12,8 @@ type NotificationSimulator struct {
 	deliveryRate float64
 	attempts     map[string]int
 	rng          *rand.Rand
+	// mu protege attempts/rng (goroutines concorrentes com SAGA_WORKERS > 1).
+	mu sync.Mutex
 }
 
 // NewNotificationSimulator cria o simulador com a taxa de sucesso de envio desejada (entre 0 e 1).
@@ -24,6 +27,9 @@ func NewNotificationSimulator(deliveryRate float64) *NotificationSimulator {
 
 // Notify simula o envio da notificação de conclusão do pedido informado.
 func (n *NotificationSimulator) Notify(_ context.Context, orderID string) (bool, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	n.attempts[orderID]++
 	attempt := n.attempts[orderID]
 

@@ -31,7 +31,7 @@ func main() {
 	writer := &kafkago.Writer{
 		Addr:         kafkago.TCP(brokers...),
 		Balancer:     &kafkago.Hash{},
-		RequiredAcks: kafkago.RequireOne,
+		RequiredAcks: infrakafka.AcksFromEnv(),
 	}
 	defer func() { _ = writer.Close() }()
 

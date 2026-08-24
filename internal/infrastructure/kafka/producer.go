@@ -30,7 +30,7 @@ func NewProducer(brokers []string, serviceName string) *Producer {
 		writer: &kafkago.Writer{
 			Addr:         kafkago.TCP(brokers...),
 			Balancer:     &kafkago.Hash{},
-			RequiredAcks: kafkago.RequireOne,
+			RequiredAcks: AcksFromEnv(),
 		},
 		serviceName: serviceName,
 	}

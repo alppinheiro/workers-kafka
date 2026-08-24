@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	kafkago "github.com/segmentio/kafka-go"
 )
 
 // BrokersFromEnv lê os endereços dos brokers Kafka da variável KAFKA_BROKERS (separados por vírgula),
@@ -57,4 +59,16 @@ func CommitIntervalFromEnv() time.Duration {
 		return 200 * time.Millisecond
 	}
 	return d
+}
+
+// AcksFromEnv lê a política de confirmação do produtor (KAFKA_ACKS).
+// "one" → RequireOne (máximo throughput, pode perder em failover de leader);
+// default/"all" → RequireAll (durabilidade — recomendado em produção/replicado).
+func AcksFromEnv() kafkago.RequiredAcks {
+	switch strings.ToLower(os.Getenv("KAFKA_ACKS")) {
+	case "one":
+		return kafkago.RequireOne
+	default:
+		return kafkago.RequireAll
+	}
 }

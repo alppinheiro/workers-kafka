@@ -180,6 +180,35 @@ gerenciados (ou self-hosted p/ reduzir custo) e observabilidade no cluster. Estr
 - [ ] **10.5** Observabilidade: kube-prometheus-stack + dashboard "Saga - Visão Geral" + alertas.
 - [ ] **10.6** Validação em produção (smoke + escala por lag) e **destruição** (custo zero quando parado).
 
+### 🔧 10.7 Hardening operacional (itens do `TECHNICAL_REVIEW.md`)
+
+- [x] **10.7.1** Durabilidade do producer — `KAFKA_ACKS` configurável (`one`/`all`, default `RequireAll`)
+  via `AcksFromEnv()` no producer e load-generator.
+- [x] **10.7.2** Race condition nos simuladores — `sync.Mutex` protegendo `attempts`/`rng` +
+  teste de regressão `TestSimulatorsConcurrentSafety` (`-race`).
+- [x] **10.7.3** Sampling OTel configurável — `samplerFromEnv()` com `OTEL_TRACES_SAMPLER`(+`ARG`)
+  da spec OTel; default `parentbased_always_on`.
+- [ ] **10.7.4** Probes com conectividade real — `/healthz` verificando metadata request no Kafka
+  e `SELECT 1` no Postgres (orquestrador/workers/projector).
+- [ ] **10.7.5** `/healthz` real no outbox-relay — goroutine de "last activity" retornando 503 se o
+  loop principal stallar (hoje o relay não expõe probe).
+- [ ] **10.7.6** Alertmanager com webhook — roteamento de `SagaDLQGrowth`/`SagaConsumerStalled`
+  para Slack/PagerDuty/email no kube-prometheus-stack (alert sem destinatário é silencioso).
+- [ ] **10.7.7** VACUUM/autovacuum na outbox — `VACUUM ANALYZE outbox` após a purge (ou autovacuum
+  agressivo na tabela) para evitar bloat do `idx_outbox_pending`.
+- [ ] **10.7.8** Circuit breaker nos gateways — `sony/gobreaker` na camada `infrastructure/external`
+  (evita thread starvation quando um gateway degrada lentamente).
+- [ ] **10.7.9** Validação ativa de `schema_version` — consumer rejeita versões desconhecidas → DLQ
+  (exercício antes de Schema Registry/Avro).
+- [ ] **10.7.10** Logging estruturado com `log/slog` — saída JSON nativa (Loki/Datadog sem parser
+  customizado; hoje é `log.Printf` quase-structured).
+
+> Itens **10.7.1–10.7.3** aplicados junto com o relatório `TECHNICAL_REVIEW.md`. Os demais são
+> pré-requisitos de "operação em produção real" para o EKS; os de maior impacto são
+> **10.7.4/10.7.5 (probes)** e **10.7.8 (circuit breaker)**.
+
+---
+
 ## 📈 Critérios de Sucesso (Definition of Done)
 
 1. **Resiliência:** O orquestrador pode ser reiniciado no meio de uma saga e ela deve continuar de onde parou.

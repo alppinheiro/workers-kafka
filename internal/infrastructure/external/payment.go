@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sync"
 	"time"
 )
 
@@ -13,6 +14,9 @@ type PaymentSimulator struct {
 	attempts       map[string]int
 	refundAttempts map[string]int
 	rng            *rand.Rand
+	// mu protege attempts/refundAttempts/rng: os workers processam eventos em
+	// goroutines concorrentes (SAGA_WORKERS > 1) e map/rand não são thread-safe.
+	mu sync.Mutex
 }
 
 // NewPaymentSimulator cria o simulador com a taxa de aprovação desejada (entre 0 e 1).
@@ -27,6 +31,9 @@ func NewPaymentSimulator(approvalRate float64) *PaymentSimulator {
 
 // Process simula a validação do pagamento do pedido informado.
 func (p *PaymentSimulator) Process(_ context.Context, orderID string) (bool, string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	p.attempts[orderID]++
 	attempt := p.attempts[orderID]
 
@@ -52,6 +59,9 @@ func (p *PaymentSimulator) Process(_ context.Context, orderID string) (bool, str
 
 // Refund simula o estorno do pagamento identificado pelo transactionID.
 func (p *PaymentSimulator) Refund(_ context.Context, orderID string, transactionID string) (bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	p.refundAttempts[orderID]++
 	attempt := p.refundAttempts[orderID]
 
