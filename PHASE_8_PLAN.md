@@ -122,3 +122,31 @@ push na main / pull_request
 3. `make ci` local — reproduz o pipeline do CI na máquina (iteração rápida antes do push).
 4. Badge de status no README.
 5. Branch protection configurada no repositório (ação manual do usuário).
+
+## 8. Resultado (24/08/2026) — pipeline verde no GitHub
+
+**✅ Validado com runs reais no GitHub Actions:**
+
+| Run | Commit | Resultado |
+|---|---|---|
+| #1 | `4648089` | cancelado pelo `concurrency` (run #2 chegou) — esperado |
+| #2 | `fa45cdf` | `check` ❌ — `golangci-lint-action@v6` **não suporta golangci-lint v2** (config do repo é v2) |
+| #3 | `ab73d72` | `check` ❌ — fix parcial (só pin da versão) |
+| **#4** | `f18d065` | ✅ **PASSING (6m25s)** — todos os 4 jobs verdes |
+
+- **`check`** ✅ — gofmt, vet, build, testes `-race`, `golangci-lint` v2.12.2.
+- **`integration`** ✅ — Testcontainers (round-trip Kafka, saga + Postgres real, atomicidade).
+- **`smoke`** ✅ — compose sobe, `ci-smoke` chega a terminal; journal/outbox/read model validados.
+- **`build-images`** ✅ — **9 imagens no GHCR** (`ghcr.io/alppinheiro/workers-kafka-<svc>`).
+
+**Ajustes necessários durante a validação:**
+1. `golangci-lint-action@v6` → **`@v7`** (v6 rejeita golangci-lint v2 com exit 3).
+2. Pin de `golangci-lint` em `v2.12.2` (versão local, determinística — `latest` é não-reprodutível).
+3. Job `smoke` usa `--profile tools` no `run` do `create-order` (serviço em profile no compose).
+
+**Observações:**
+- Job `smoke` leva ~6 min (constrói as 9 imagens do zero no runner). Otimização futura:
+  cache buildx `type=gha` no build do smoke.
+- Aviso de Node.js 20 deprecado em `checkout@v4`/`setup-go@v5` é não-fatal (rodam em Node 24).
+- **Pendência (ação manual no GitHub):** branch protection em `main` e tornar os pacotes
+  GHCR **públicos** (necessário para o pull sem auth na Fase 9 — Kubernetes).
