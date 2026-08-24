@@ -165,6 +165,10 @@ Kubernetes/KEDA): o paralelismo vem das **partições do Kafka** e de **múltipl
 - Mesma imagem Docker; configuração por env/segredos (SSM/Secrets Manager).
 
 ### CI/CD com GitHub Actions (planejamento)
+> ⚠️ **Nota histórica (24/08/2026):** este planejamento foi **implementado na Fase 8**
+> (`PHASE_8_PLAN.md`, `.github/workflows/ci.yml`) com 4 jobs — `check`, `integration`
+> (Testcontainers), `smoke` (e2e) e `build-images` (9 imagens → **GHCR**, não ECR). O CD
+> (Helm/K8s) permanece para as Fases 9/10.
 - **CI** (`.github/workflows/ci.yml`):
   - `make check` (fmt, build, vet, lint) e testes unitários.
   - **Testes de integração** usando os **services nativos do GitHub Actions** (containers

@@ -133,7 +133,7 @@ fluxo contínuo + rastreabilidade total. Detalhes em `PHASE_7_PLAN.md`.
 
 ---
 
-## 🚀 Fase 8: CI/CD com GitHub Actions (planejada)
+## 🚀 Fase 8: CI/CD com GitHub Actions (concluída — falta só ação manual 8.5)
 
 **Objetivo:** rede de segurança automática — toda mudança passa por `check` (qualidade +
 unitários), `integration` (Testcontainers), `smoke` (e2e via docker-compose) e `build-images`

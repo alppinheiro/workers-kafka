@@ -15,7 +15,7 @@ A ideia principal é simular o ciclo de vida de um pedido com mudança de status
 - Estado do orquestrador: persistido em PostgreSQL (tabela `sagas`), com recuperação após restart; todos os eventos e payloads de request/response dos gateways registrados em `saga_events` (rastreabilidade).
 - Serialização: JSON no início, com schema versionado e evolutivo.
 - Kafka em Go: `github.com/segmentio/kafka-go` como escolha inicial, isolado por interfaces.
-- Escopo atual: testes unitários implementados (Fase 1); persistência, rastreabilidade e read model implementados (Fase 2); outbox, DLQ e idempotência implementados (Fase 3); observabilidade distribuída com OpenTelemetry + Jaeger implementada (Fase 4); goroutines explícitas/concorrência fora de escopo (Fase 5).
+- Escopo atual: testes unitários e de integração (Fase 1 + Testcontainers com Kafka/Postgres reais); persistência, rastreabilidade e read model (Fase 2); outbox, DLQ e idempotência (Fase 3); observabilidade distribuída com OpenTelemetry + Jaeger (Fase 4); escalabilidade com 4 partições, `SAGA_WORKERS`, consumer groups e autoscaler por lag (Fase 5); métricas Prometheus + dashboard Grafana (Fase 6); performance/resiliência — relay em lote (~485 ev/s), commit de offsets em lote, watchdog anti-stall e **transação atômica** estado+journal+outbox (Fase 7); **CI/CD com GitHub Actions** — check, integration, smoke e build-images para GHCR (Fase 8). Deploy em Kubernetes/cloud planejado (Fases 9/10).
 
 As seções abaixo detalham e complementam esse resumo, evitando repetir decisões já fechadas quando possível.
 
@@ -351,7 +351,7 @@ Este fluxo já está consolidado no topo do documento e segue a sequência `PEND
 - Eventos terminais `ORDER_COMPLETED` e `ORDER_FAILED` são publicados em `orders.status` para rastreabilidade externa do encerramento.
 - Os workers validam `event_type` e também o `status_atual` esperado antes de executar a simulação local.
 - A infraestrutura local ganhou `Dockerfile` único com build parametrizado por entrypoint e `docker-compose.yml` com broker Kafka, inicialização de tópicos, workers, orquestrador e consumer de auditoria.
-- A execução local também pode ser feita via `Makefile`, centralizando os comandos `up`, `down`, `logs`, `build`, `vet` e `create-order`.
+- A execução local também pode ser feita via `Makefile`, centralizando os comandos `up`, `down`, `logs`, `build`, `vet`, `create-order`, `integration` (Testcontainers) e `ci` (pipeline local = `check` + `integration`, o mesmo do GitHub Actions).
 - O workflow local via `Makefile` também contempla `lint`, que deve degradar graciosamente quando a ferramenta não estiver disponível no PATH.
 - O workflow local via `Makefile` pode usar `check` como atalho para `fmt`, `build`, `vet` e `lint` em sequência.
 - O fluxo de debug ponta a ponta no VS Code pode usar Kafka em Docker e os binários Go em modo debug local, com `KAFKA_BROKERS=localhost:9094` para todos os processos instrumentados pelo editor.
@@ -362,13 +362,13 @@ Este fluxo já está consolidado no topo do documento e segue a sequência `PEND
 - Garantia de dados: at-least-once + dedup por `event_id` + reentrega do Kafka; Outbox Pattern adiado para a Fase 3.
 - Consulta do read model nesta fase via SQL (psql); API REST de consulta de pedido fica para uma fase futura.
 - Fase 3 (resiliência) concluída conforme `PHASE_3_PLAN.md`: idempotência por `event_id` (orquestrador e workers), DLQ por tópico (`orders.*.dlq`) com erros definitivos (`ErrNonRetryable`), e Outbox Pattern (tabela `outbox` + `OutboxPublisher` + serviço `outbox-relay`).
-- A ordem de escrita nos handlers é: Save/Append (estado + journal) → Outbox; a reentrega do Kafka + idempotência cobrem os gaps. A transação atômica única (estado + journal + outbox) é refinamento futuro documentado.
+- A ordem de escrita nos handlers passou a ser **transação única** desde a Etapa 7.4: estado (`sagas`) + journal (`saga_events`) + outbox são gravados em um mesmo `pgx.Tx` via `SagaUnitOfWork` (`internal/infrastructure/uow`) — eliminando as janelas residuais que antes eram cobertas pela idempotência.
 - Fase 4 (observabilidade) concluída conforme `PHASE_4_PLAN.md`: OpenTelemetry com exporter OTLP para o Jaeger, propagação W3C `traceparent` via Kafka headers (inclusive através da outbox, com coluna `traceparent` reconstruída pelo `outbox-relay`), e um span por evento consumido (`consume <EVENT_TYPE>`).
 - Teste de carga (2000 pedidos): ingestão ~47.000 eventos/s; `outbox-relay` otimizado para publicar em lote (`PublishBatch`). O gargalo restante são os consumers single-threaded → Fase 5 (concorrência com goroutines e mais partições).
 - Fase 5 (escalabilidade de produção) concluída conforme `PHASE_5_PLAN.md` e `BENCHMARK.md`: 4 partições por tópico, `SAGA_WORKERS` (Readers concorrentes no mesmo consumer group), escala horizontal via `--scale` (consumer groups), outbox-relay com `FOR UPDATE SKIP LOCKED` (claims) e autoscaler por lag (análogo local ao KEDA/HPA). Benchmark: 3.000 pedidos/60 s com 1 réplica deixam 2.012 na fila; com 3 réplicas + 2 relays, 164 (~12×).
-- CI/CD (planejado): GitHub Actions com `make check` + testes de integração (services postgres/kafka) + push de imagem para ECR; deploy futuro em EKS via Helm (publicação AWS: EKS/ECS, MSK, RDS).
+- CI/CD (Fase 8 concluída, validada em 24/08/2026): GitHub Actions com 4 jobs — `check` (qualidade + unitários), `integration` (Testcontainers), `smoke` (e2e docker-compose até saga terminal) e `build-images` (9 imagens → GHCR `ghcr.io/<owner>/workers-kafka-<svc>`). Deploy futuro em Kubernetes/cloud via Helm (Fases 9/10: EKS, MSK, RDS, KEDA).
 - Fase 6 (métricas) concluída conforme `PHASE_6_PLAN.md`: métricas Prometheus expostas por serviço (`/metrics` nas portas 9101–9107), `metrics-exporter` (gauges do Postgres: sagas por status, completadas/falhadas), Prometheus + Grafana no docker-compose com dashboard provisionado "Saga - Visão Geral" (8 painéis).
-- **Testcontainers** (pendência da Fase 1 fechada): testes de integração com Kafka e Postgres reais em containers, protegidos pela build tag `integration` (`make integration`). Cobre round-trip Producer→Consumer (Kafka real) e o fluxo completo da saga contra Postgres real (journal até COMPLETED). Requer Docker; no macOS/Colima o `make integration` aponta `DOCKER_HOST` para o socket do Colima.
+- **Testcontainers** (pendência da Fase 1 fechada): testes de integração com Kafka e Postgres reais em containers, protegidos pela build tag `integration` (`make integration`). Cobre round-trip Producer→Consumer (Kafka real) e o fluxo completo da saga contra Postgres real (journal até COMPLETED). Requer Docker; o `make integration` detecta o socket automaticamente (`DOCKER_HOST` → colima/macOS → Docker nativo/CI).
 
 ## Observação
 

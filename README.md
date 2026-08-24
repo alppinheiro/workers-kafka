@@ -167,9 +167,9 @@ Cobertura:
 - **Fluxo completo da saga**: orquestrador + repositórios reais contra Postgres real em container
   (journal `saga_events` com a sequência IN/OUT completa até `COMPLETED`).
 
-No macOS com Colima, o `make integration` já aponta o socket do Docker para a VM do Colima.
-No Linux (CI/GitHub Actions) as variáveis `DOCKER_HOST`/`TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE`
-definidas localmente são respeitadas.
+O `make integration` detecta o socket do Docker automaticamente: usa `DOCKER_HOST` se
+definido, senão o socket do Colima (macOS) se existir, senão o Docker nativo
+(CI/GitHub Actions).
 
 ## Visão Geral da Arquitetura
 
@@ -887,7 +887,11 @@ Incluído nesta fase:
 - DLQ (tópicos `orders.*.dlq`) e idempotência por `event_id`
 - transação atômica única (estado + journal + outbox no mesmo `pgx.Tx`) via `SagaUnitOfWork`
 - observabilidade distribuída (OpenTelemetry + Jaeger)
+- métricas Prometheus por serviço + dashboard Grafana (Fase 6)
+- performance/resiliência: relay em lote (~485 ev/s), commit de offsets em lote, watchdog
+  anti-stall e alertas (Fase 7)
 - escalabilidade (4 partições, `SAGA_WORKERS`, multi-instância, outbox com claims, autoscaler)
+- CI/CD com GitHub Actions (check + integration + smoke + build-images → GHCR) (Fase 8)
 - migrations com `golang-migrate` via Docker
 - Docker para execução local
 - debug ponta a ponta no VS Code
@@ -904,6 +908,5 @@ Fora de escopo nesta fase:
 
 ## Próximos Passos Naturais
 
-- CI/CD com GitHub Actions (CI funcional: `make check` + testes de integração + imagem Docker)
-- cloud readiness AWS (Helm/Terraform, EKS/ECS + MSK + RDS; KEDA no lugar do autoscaler local)
+- Kubernetes local (kind + Helm + KEDA) e deploy em cloud AWS (EKS/ECS + MSK + RDS) — Fases 9/10
 - API REST de consulta de pedido lendo o read model `order_views`
