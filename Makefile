@@ -21,7 +21,7 @@ help:
 	@echo "  make inspect       - consulta o read model (order_views) de um pedido no banco de leitura"
 	@echo "  make autoscale     - roda o autoscaler (lag -> docker-compose scale) no host"
 	@echo "  make rebuild       - rebuild da stack antes de subir"
-	@echo "  make k8s-up        - sobe cluster kind + Strimzi/Kafka + Postgres + Helm chart (Fase 9)"
+	@echo "  make k8s-up        - sobe cluster kind + Kafka + Postgres + Helm chart (Fase 9)"
 	@echo "  make k8s-down      - derruba o cluster kind e remove os recursos"
 	@echo "  make k8s-logs      - segue os logs de um deployment (SVC=<nome>)"
 	@echo "  make k8s-smoke     - smoke e2e no cluster (ORDER_ID=<id>) - scripts/k8s-smoke.sh"

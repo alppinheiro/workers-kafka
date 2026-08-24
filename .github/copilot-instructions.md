@@ -4,7 +4,7 @@
 Projeto de estudo em Go para simular o ciclo de vida de um pedido usando **Saga Orquestrada** e **workers assíncronos via Kafka**.
 
 ## 2. Escopo Atual e Restrições (Fase Atual)
-- **Incluso (Fases 1–8 concluídas — ver `PHASE_*_PLAN.md`, `BENCHMARK.md` e `EVOLUTION_PLAN.md`):**
+- **Incluso (Fases 1–9 concluídas — ver `PHASE_*_PLAN.md`, `BENCHMARK.md` e `EVOLUTION_PLAN.md`):**
   - Testes unitários e de integração (Fase 1 + Testcontainers com Kafka e Postgres reais)
   - Persistência + rastreabilidade: `sagas`, `saga_events` (journal com payloads request/response)
   - Read model `order_views` (banco de leitura) projetado via Kafka pelo serviço `projector`
@@ -19,10 +19,13 @@ Projeto de estudo em Go para simular o ciclo de vida de um pedido usando **Saga 
   - **Transação atômica única** (Etapa 7.4): estado + journal + outbox em um `pgx.Tx` via
     `SagaUnitOfWork` (`internal/infrastructure/uow`)
   - **CI/CD com GitHub Actions** (Fase 8): 4 jobs — `check`, `integration` (Testcontainers),
-    `smoke` (e2e docker-compose) e `build-images` (9 imagens → GHCR) — pipeline verde validado
+    `smoke` (e2e docker-compose) e `build-images` (9 imagens → GHCR, multi-arch) — verde validado
+  - **Kubernetes local** (Fase 9): Helm chart `deploy/helm/order-saga`, kind + Kafka
+    (`apache/kafka` + Job `kafka-init` de tópicos) + Postgres, probes `/healthz`, **KEDA** por
+    lag (1→3 réplicas validado) e `make k8s-*`
 - **Fora de Escopo Nesta Fase:**
   - API REST de consulta de pedido
-  - Escala horizontal real em Kubernetes (KEDA/HPA) e deploy em cloud — **Fases 9/10 planejadas**
+  - Deploy em cloud (EKS + Terraform + MSK/RDS + ArgoCD) — **Fase 10 planejada**
 
 ## 3. Estrutura Obrigatória de Pacotes
 ```text

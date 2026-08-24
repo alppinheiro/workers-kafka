@@ -909,6 +909,8 @@ Incluído nesta fase:
   anti-stall e alertas (Fase 7)
 - escalabilidade (4 partições, `SAGA_WORKERS`, multi-instância, outbox com claims, autoscaler)
 - CI/CD com GitHub Actions (check + integration + smoke + build-images → GHCR) (Fase 8)
+- Kubernetes local: Helm chart, kind + Kafka `apache/kafka` + Postgres, probes `/healthz`,
+  migrations Job e **KEDA por lag** (Fase 9) — `make k8s-*`
 - migrations com `golang-migrate` via Docker
 - Docker para execução local
 - debug ponta a ponta no VS Code
@@ -921,9 +923,10 @@ Incluído nesta fase:
 Fora de escopo nesta fase:
 
 - API REST
-- escala horizontal real em Kubernetes (KEDA/HPA)
+- deploy em cloud (EKS + Terraform + MSK/RDS + ArgoCD) — Fase 10
+- observabilidade no cluster (kube-prometheus-stack) — adiada p/ Fase 10 (recursos locais)
 
 ## Próximos Passos Naturais
 
-- Kubernetes local (kind + Helm + KEDA) e deploy em cloud AWS (EKS/ECS + MSK + RDS) — Fases 9/10
+- Deploy em cloud AWS: EKS + Terraform + MSK/RDS + ArgoCD (GitOps) — Fase 10
 - API REST de consulta de pedido lendo o read model `order_views`

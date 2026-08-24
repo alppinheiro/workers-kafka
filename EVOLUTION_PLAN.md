@@ -148,12 +148,12 @@ unitários), `integration` (Testcontainers), `smoke` (e2e via docker-compose) e 
 
 ---
 
-## ☸️ Fase 9: Kubernetes local (kind + Helm + KEDA) (planejada)
+## ☸️ Fase 9: Kubernetes local (kind + Helm + KEDA) (concluída — 9.7 adiado p/ cloud)
 
 **Objetivo:** rodar a stack em **Kubernetes local (kind)** — Helm chart (`deploy/helm/order-saga`),
-Kafka via **Strimzi** (CRD `Kafka`/`KafkaTopic`), Postgres no cluster, **KEDA** escalando por
-consumer lag, probes `/healthz` + resources, migrations como Job e smoke end-to-end. Valida o
-design a custo zero antes da cloud (Fase 10). Detalhes em `PHASE_9_PLAN.md`.
+Kafka (`apache/kafka` KRaft + Job `kafka-init` de tópicos — fallback do Strimzi/bitnami), Postgres
+no cluster, **KEDA** escalando por consumer lag, probes `/healthz` + resources, migrations como Job
+e smoke end-to-end. Validou o design a custo zero antes da cloud (Fase 10). Detalhes em `PHASE_9_PLAN.md`.
 
 - [x] **9.1** Cluster kind (2 nodes) + `Makefile` `k8s-up/down/logs/smoke`.
 - [x] **9.2** Helm chart `order-saga` (Deployments/Services/ConfigMap/Secret/values por env).
@@ -164,6 +164,20 @@ design a custo zero antes da cloud (Fase 10). Detalhes em `PHASE_9_PLAN.md`.
 - [ ] **9.7** Observabilidade (kube-prometheus-stack + dashboard) — **adiado** (recursos do Colima 4 GB); fazer na Fase 10/cloud.
 
 ---
+
+## ☁️ Fase 10: Cloud AWS (EKS + Terraform + GitOps) (planejada)
+
+**Objetivo:** subir o projeto em **produção na AWS** — EKS provisionado com **Terraform**,
+imagens do GHCR (multi-arch), **KEDA** por lag, **ArgoCD (GitOps)** para deploy, Kafka e Postgres
+gerenciados (ou self-hosted p/ reduzir custo) e observabilidade no cluster. Estratégia de custo:
+**criar → estudar → destruir** (IaC). Detalhes em `PHASE_10_PLAN.md`.
+
+- [ ] **10.1** Terraform: VPC + EKS (control plane + node group) + IRSA/IAM.
+- [ ] **10.2** Infra gerenciada: RDS Postgres (free tier) + Kafka (**MSK** ou **Strimzi** no EKS — decisão de custo).
+- [ ] **10.3** Helm chart no EKS: deploy da stack + KEDA + Ingress (nginx) + secrets.
+- [ ] **10.4** **ArgoCD** (GitOps): app do repositório apontando para o chart + auto-sync.
+- [ ] **10.5** Observabilidade: kube-prometheus-stack + dashboard "Saga - Visão Geral" + alertas.
+- [ ] **10.6** Validação em produção (smoke + escala por lag) e **destruição** (custo zero quando parado).
 
 ## 📈 Critérios de Sucesso (Definition of Done)
 
