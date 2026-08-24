@@ -96,7 +96,7 @@ jobs:
           exit 1
 
       - name: Cria pedido de teste
-        run: docker compose run --rm create-order ci-smoke
+        run: docker compose --profile tools run --rm create-order ci-smoke
 
       - name: Aguarda a saga chegar a estado terminal
         run: sleep 30
