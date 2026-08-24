@@ -139,12 +139,12 @@ fluxo contínuo + rastreabilidade total. Detalhes em `PHASE_7_PLAN.md`.
 unitários), `integration` (Testcontainers), `smoke` (e2e via docker-compose) e `build-images`
 (push das 9 imagens para GHCR). Pré-requisito para deploy em Kubernetes (Fase 9). Detalhes em `PHASE_8_PLAN.md`.
 
-- [ ] **8.1** Job `check` — `make check` verde no runner (fmt, vet, build, testes, lint) + cache do Go.
-- [ ] **8.2** Job `integration` — Testcontainers (Kafka + Postgres reais) verdes no runner
+- [x] **8.1** Job `check` — `make check` verde no runner (fmt, vet, build, testes, lint) + cache do Go.
+- [x] **8.2** Job `integration` — Testcontainers (Kafka + Postgres reais) verdes no runner
   (ajuste do `DOCKER_HOST` do Makefile, que hoje aponta para o colima local).
-- [ ] **8.3** Job `smoke` — sobe o compose e valida saga `ci-smoke-*` até terminal (sagas + journal + outbox + read model).
-- [ ] **8.4** Job `build-images` — 9 imagens no GHCR (`ghcr.io/<owner>/workers-kafka-<svc>`), tags `:sha-<sha>`/`:latest` (e `:vX.Y.Z` em tags).
-- [ ] **8.5** Branch protection em `main` (PR obrigatório + checks) e badge de status no README.
+- [x] **8.3** Job `smoke` — sobe o compose e valida saga `ci-smoke-*` até terminal (sagas + journal + outbox + read model).
+- [x] **8.4** Job `build-images` — 9 imagens no GHCR (`ghcr.io/<owner>/workers-kafka-<svc>`), tags `:sha-<sha>`/`:latest` (e `:vX.Y.Z` em tags).
+- [ ] **8.5** Branch protection em `main` (PR obrigatório + checks) e badge de status no README. *(ação manual no GitHub — badge já adicionado)*
 
 ---
 

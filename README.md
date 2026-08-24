@@ -1,5 +1,7 @@
 # Order Saga Microservices
 
+[![CI](https://github.com/alppinheiro/workers-kafka/actions/workflows/ci.yml/badge.svg)](https://github.com/alppinheiro/workers-kafka/actions/workflows/ci.yml)
+
 Projeto de estudo em Go para simular o ciclo de vida de um pedido com saga orquestrada e workers assíncronos via Kafka.
 
 O fluxo é centrado em um orquestrador que recebe a criação do pedido, publica comandos para os workers e decide o próximo passo a partir dos resultados de pagamento, estoque e notificação.

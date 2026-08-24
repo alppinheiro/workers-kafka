@@ -1,0 +1,193 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: "1. check (qualidade + unitários)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "Arquivos não formatados:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: Testes unitários (-race -cover)
+        run: go test ./... -race -cover
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+  integration:
+    name: "2. integration (Testcontainers — Kafka + Postgres reais)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Testcontainers (round-trip Kafka + saga + atomicidade)
+        run: go test -tags integration -v ./internal/infrastructure/kafka/... ./internal/infrastructure/persistence/postgres/...
+
+  smoke:
+    name: "3. smoke (e2e docker-compose — teste de produção)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build das imagens dos serviços
+        run: |
+          docker compose build \
+            orchestrator worker-payment worker-inventory worker-notification \
+            outbox-relay projector order-status metrics-exporter create-order
+
+      - name: Sobe a stack completa
+        run: docker compose up -d
+
+      - name: Aguarda kafka + postgres saudáveis
+        run: |
+          for i in $(seq 1 60); do
+            if docker compose ps postgres | grep -q healthy \
+              && docker compose ps kafka | grep -q healthy; then
+              echo "infra saudável"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "timeout aguardando infra"
+          docker compose ps
+          exit 1
+
+      - name: Cria pedido de teste
+        run: docker compose run --rm create-order ci-smoke
+
+      - name: Aguarda a saga chegar a estado terminal
+        run: sleep 30
+
+      - name: Valida saga + journal + outbox + read model
+        run: |
+          set -e
+          PG="docker compose exec -T postgres psql -U saga -d saga"
+          PGR="docker compose exec -T postgres-read psql -U saga -d saga_read"
+
+          # 1) saga em estado terminal no banco de escrita
+          status=$($PG -tAc "SELECT current_status FROM sagas WHERE order_id='ci-smoke'")
+          echo "sagas: $status"
+          test "$status" = "COMPLETED" -o "$status" = "FAILED"
+
+          # 2) journal populado (estado + journal na mesma transação)
+          journal=$($PG -tAc "SELECT count(*) FROM saga_events WHERE order_id='ci-smoke'")
+          echo "saga_events: $journal"
+          test "$journal" -gt 0
+
+          # 3) outbox drenada (relay acompanha a geração)
+          for i in $(seq 1 12); do
+            pend=$($PG -tAc "SELECT count(*) FROM outbox WHERE key='ci-smoke' AND published_at IS NULL")
+            [ "$pend" -eq 0 ] && break
+            sleep 5
+          done
+          echo "outbox pendente: $pend"
+          test "$pend" -eq 0
+
+          # 4) read model consistente (projector — consistência eventual)
+          for i in $(seq 1 12); do
+            rstatus=$($PGR -tAc "SELECT current_status FROM order_views WHERE order_id='ci-smoke'")
+            [ "$rstatus" = "COMPLETED" -o "$rstatus" = "FAILED" ] && break
+            sleep 5
+          done
+          echo "order_views: $rstatus"
+          test "$rstatus" = "COMPLETED" -o "$rstatus" = "FAILED"
+
+      - name: Deruba a stack
+        if: always()
+        run: docker compose down -v
+
+  build-images:
+    name: "4. build-images (GHCR)"
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - orchestrator
+          - worker-payment
+          - worker-inventory
+          - worker-notification
+          - outbox-relay
+          - projector
+          - order-status
+          - metrics-exporter
+          - create-order
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Metadata das tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/workers-kafka-${{ matrix.service }}
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}
+
+      - name: Build e push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          build-args: TARGET=cmd/${{ matrix.service }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
