@@ -1,0 +1,31 @@
+# ArgoCD Application (GitOps, Fase 10) — o repositório é a fonte da verdade.
+# Aplicar após instalar o ArgoCD no EKS:
+#   kubectl apply -f deploy/argocd/app.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: order-saga
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/alppinheiro/workers-kafka
+    targetRevision: main
+    path: deploy/helm/order-saga
+    helm:
+      valueFiles:
+        - values-prod.yaml
+      parameters:
+        - name: image.tag
+          value: v0.1.0 # trocar pela tag semver real (CI publica :latest + :vX.Y.Z)
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: order-saga
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

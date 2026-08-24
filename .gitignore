@@ -3,6 +3,12 @@
 .env.*
 !.env.example
 
+# Terraform — nunca versionar tfvars com credenciais
+terraform/.terraform/
+terraform/terraform.tfvars
+terraform/*.tfstate
+terraform/*.tfstate.backup
+
 # Builds e artefatos
 bin/
 dist/

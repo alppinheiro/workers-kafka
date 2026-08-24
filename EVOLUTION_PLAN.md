@@ -173,6 +173,7 @@ gerenciados (ou self-hosted p/ reduzir custo) e observabilidade no cluster. Estr
 **criar → estudar → destruir** (IaC). Detalhes em `PHASE_10_PLAN.md`.
 
 - [ ] **10.1** Terraform: VPC + EKS (control plane + node group) + IRSA/IAM.
+  *(✅ arquivos `terraform/` prontos e `terraform validate` OK — aplicar exige `aws configure`)*
 - [ ] **10.2** Infra gerenciada: RDS Postgres (free tier) + Kafka (**MSK** ou **Strimzi** no EKS — decisão de custo).
 - [ ] **10.3** Helm chart no EKS: deploy da stack + KEDA + Ingress (nginx) + secrets.
 - [ ] **10.4** **ArgoCD** (GitOps): app do repositório apontando para o chart + auto-sync.

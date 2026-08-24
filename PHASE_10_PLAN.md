@@ -138,3 +138,19 @@ Kubernetes (namespace order-saga):
 5. `scripts/k8s-smoke.sh` rodando contra o EKS + validação de escala por lag.
 6. Documentação: procedimento de custo (criar/destruir) no README/runbook.
 
+## 10. Andamento (24/08/2026) — parte sem custo concluída
+
+Preparados **sem custo** (aplicação aguarda credenciais AWS):
+
+- ✅ `terraform/` — `versions.tf`, `variables.tf`, `main.tf` (VPC + EKS + RDS), `outputs.tf`,
+  `terraform.tfvars.example` e `README.md`. `terraform init` + `terraform validate` **OK**
+  (módulos `terraform-aws-modules/vpc` e `eks` ~>20; RDS `db.t4g.micro` free tier).
+- ✅ `deploy/helm/order-saga/values-prod.yaml` — endpoints de produção (RDS/Strimzi) e notas
+  de segredos; render Helm validado.
+- ✅ `deploy/argocd/app.yaml` — Application ArgoCD (GitOps, auto-sync, `values-prod.yaml`).
+- ✅ `Makefile`: `make aws-up` / `make aws-down` (terraform apply/destroy).
+- ✅ `.gitignore` protege `terraform.tfvars`/state.
+
+**Pendente (com custo / credenciais):** `aws configure` + `make aws-up` → aplicar o chart +
+KEDA + ArgoCD + kube-prometheus-stack (10.3–10.6).
+

@@ -1,0 +1,6 @@
+# Copie para terraform.tfvars (gitignored) e ajuste.
+# NUNCA commitar credenciais.
+region        = "us-east-1"
+cluster_name  = "order-saga"
+environment   = "prod"
+db_password   = "TROCAR_POR_UMA_SENHA_FORTE"

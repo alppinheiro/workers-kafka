@@ -2,7 +2,7 @@ COMPOSE ?= docker-compose
 ORDER_ID ?= order-001
 SERVICES = kafka kafka-init postgres migrations postgres-read migrations-read jaeger prometheus grafana orchestrator worker-payment worker-inventory worker-notification order-status projector outbox-relay metrics-exporter
 
-.PHONY: help fmt build vet test lint check ci integration up down logs ps create-order inspect rebuild k8s-up k8s-down k8s-logs k8s-smoke
+.PHONY: help fmt build vet test lint check ci integration up down logs ps create-order inspect rebuild k8s-up k8s-down k8s-logs k8s-smoke aws-up aws-down
 
 help:
 	@echo "Targets disponiveis:"
@@ -25,6 +25,8 @@ help:
 	@echo "  make k8s-down      - derruba o cluster kind e remove os recursos"
 	@echo "  make k8s-logs      - segue os logs de um deployment (SVC=<nome>)"
 	@echo "  make k8s-smoke     - smoke e2e no cluster (ORDER_ID=<id>) - scripts/k8s-smoke.sh"
+	@echo "  make aws-up        - terraform apply (VPC+EKS+RDS na AWS - Fase 10, requer aws configure)"
+	@echo "  make aws-down      - terraform destroy (custo ≈ zero quando parado)"
 
 fmt:
 	gofmt -w .
@@ -129,3 +131,10 @@ k8s-logs:
 
 k8s-smoke:
 	bash scripts/k8s-smoke.sh $(ORDER_ID)
+
+# Fase 10 — Cloud AWS (requer: brew install terraform awscli; aws configure)
+aws-up:
+	cd terraform && terraform init && terraform apply -auto-approve
+
+aws-down:
+	cd terraform && terraform destroy -auto-approve
