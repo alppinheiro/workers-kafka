@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,6 +11,7 @@ import (
 	"workers-kafka/internal/infrastructure/external"
 	"workers-kafka/internal/infrastructure/health"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
+	"workers-kafka/internal/infrastructure/logging"
 	"workers-kafka/internal/infrastructure/metrics"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 	"workers-kafka/internal/infrastructure/telemetry"
@@ -20,6 +21,7 @@ import (
 
 // main sobe o worker de notificação, consumindo comandos do tópico orders.notification e publicando o resultado.
 func main() {
+	logging.Setup("worker-notification")
 	brokers := infrakafka.BrokersFromEnv()
 
 	dlq := infrakafka.NewDLQWriter(brokers)
@@ -42,13 +44,15 @@ func main() {
 
 	shutdown, err := telemetry.Init("worker-notification")
 	if err != nil {
-		log.Fatalf("worker de notificação: falha ao inicializar telemetria: %v", err)
+		slog.Error("falha ao inicializar telemetria", "error", err)
+		os.Exit(1)
 	}
 	defer func() { _ = shutdown(ctx) }()
 
 	pool, err := infrapostgres.Connect(ctx, infrapostgres.DatabaseURLFromEnv())
 	if err != nil {
-		log.Fatalf("worker de notificação: %v", err)
+		slog.Error("falha ao conectar no postgres", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
@@ -56,9 +60,10 @@ func main() {
 
 	useCase := worker.NewNotificationUseCase(external.NotificationGatewayFromEnv(gateway), uow.New(pool))
 
-	log.Println("worker de notificação: aguardando comandos")
+	slog.Info("worker de notificação: aguardando comandos")
 	if err := consumer.Consume(ctx, interfaces.WithLogging("worker-notification", useCase.Handle)); err != nil && ctx.Err() == nil {
-		log.Fatalf("worker de notificação: encerrado com erro: %v", err)
+		slog.Error("worker de notificação encerrou com erro", "error", err)
+		os.Exit(1)
 	}
-	log.Println("worker de notificação: encerrado")
+	slog.Info("worker de notificação: encerrado")
 }

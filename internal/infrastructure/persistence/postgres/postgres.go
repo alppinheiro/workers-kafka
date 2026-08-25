@@ -3,7 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -32,7 +32,7 @@ func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 			err = pingErr
 		}
 
-		log.Printf("component=postgres phase=connect-retry attempt=%d error=%v", attempt, err)
+		slog.Warn("retry de conexão com postgres", "component", "postgres", "phase", "connect-retry", "attempt", attempt, "error", err)
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("conexão com postgres interrompida: %w", ctx.Err())

@@ -8,3 +8,8 @@ tmp
 .env
 .env.*
 !.env.example
+# Diretórios grandes desnecessários para o build das imagens Go:
+terraform
+deploy
+docs
+*.md

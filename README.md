@@ -93,6 +93,19 @@ Toda configuração vem de **variáveis de ambiente** (o código não tem `if am
 O `.env.example` documenta todas as variáveis; o `.env` real é ignorado pelo git
 (nunca versionar credenciais).
 
+**Variáveis de tuning (produção):**
+
+| Variável | Default | O que controla |
+|---|---|---|
+| `SAGA_WORKERS` | `1` | Goroutines de consumo no mesmo consumer group (concorrência intra-instância) |
+| `KAFKA_COMMIT_BATCH` | `50` | Mensagens acumuladas antes do commit de offsets em lote |
+| `KAFKA_COMMIT_INTERVAL` | `200ms` | Intervalo máximo entre commits em lote |
+| `KAFKA_ACKS` | `all` | Durabilidade do producer (`all` = leader + ISR; `one` = só leader, maior throughput) |
+| `OUTBOX_BATCH_SIZE` | `500` | Tamanho do lote do outbox-relay |
+| `KAFKA_AUTO_CREATE_TOPICS_ENABLE` | `true` | Criar tópicos automaticamente (em produção: `false`) |
+| `OTEL_TRACES_SAMPLER` (+ `OTEL_TRACES_SAMPLER_ARG`) | `parentbased_always_on` | Amostragem de traces (produção: `parentbased_traceidratio` + `ARG=0.1`) |
+| `GATEWAY_CB_ENABLED` / `GATEWAY_CB_MAX_FAILURES` / `GATEWAY_CB_TIMEOUT` | `true` / `5` / `10s` | Circuit breaker dos gateways (abre após N falhas; half-open testa 1 request após o timeout) |
+
 Para validar o projeto localmente:
 
 ```bash
@@ -475,6 +488,15 @@ Nesse modo, o Kafka e o Postgres rodam em containers e os processos Go rodam loc
 
 O projeto foi instrumentado para permitir rastreamento ponta a ponta.
 
+> **Formato:** desde o hardening (Fase 10), os logs são **JSON estruturado** (`log/slog`
+> com `logging.Setup(service)` no início de cada main) — ingeridos diretamente por
+> CloudWatch/Loki sem parser customizado. Exemplo de uma linha real:
+> ```json
+> {"time":"2026-08-25T12:01:03Z","level":"INFO","msg":"evento processado",
+>  "service":"worker-payment","component":"worker-payment","phase":"processed",
+>  "event_id":"...","order_id":"ci-smoke","type":"PAYMENT_RESULT","duration":0.000024}
+> ```
+
 ### Logs de consumo
 
 Os consumers registram:
@@ -691,6 +713,9 @@ O projeto é instrumentado com **OpenTelemetry**: cada evento consumido gera um 
 ### Configuração
 
 - Endpoint OTLP via env `OTEL_EXPORTER_OTLP_ENDPOINT` (no docker-compose é `jaeger:4318`; local, `localhost:4318`).
+- Amostragem via env `OTEL_TRACES_SAMPLER` (+ `OTEL_TRACES_SAMPLER_ARG`): default
+  `parentbased_always_on` (estudo); em produção use `parentbased_traceidratio` com
+  `OTEL_TRACES_SAMPLER_ARG=0.1` (10%) para reduzir custo de storage/CPU.
 - Se o Jaeger estiver desligado, os serviços continuam funcionando normalmente (os spans são descartados).
 
 ### Métricas (Prometheus + Grafana)
@@ -710,6 +735,18 @@ Métricas principais:
 - `saga_outbox_pending` / `saga_outbox_published_total`
 - `saga_orders_pending{status}` / `saga_orders_completed_total` / `saga_orders_failed_total`
   (expostas pelo `metrics-exporter`, que lê o Postgres a cada 10s)
+
+#### Probes de saúde (`/healthz`)
+
+Cada serviço expõe `/healthz` nas portas 9101–9107 com **conectividade real** (não é um
+`200` incondicional):
+- `health.Postgres` — `Ping` no pool (equivalente a `SELECT 1`);
+- `health.Kafka` — dial + handshake com qualquer broker;
+- `outbox-relay` — adiciona `health.LastActivity` (503 se o loop principal ficar sem
+  concluir um ciclo por 30s).
+
+Com a infra de pé a resposta é `200 OK`; com uma dependência inacessível, `503` com o
+motivo. É o que o K8s usa nas liveness/readiness probes (Fase 9).
 
 ## Teste de Carga e Como Escalar
 O projeto inclui um **load-generator** que publica eventos `ORDER_CREATED` em lote e mede a vazão de ingestão:
@@ -910,6 +947,9 @@ Incluído nesta fase:
 - performance/resiliência: relay em lote (~485 ev/s), commit de offsets em lote, watchdog
   anti-stall e alertas (Fase 7)
 - escalabilidade (4 partições, `SAGA_WORKERS`, multi-instância, outbox com claims, autoscaler)
+- resiliência de gateway: circuit breaker (`gobreaker`) com fail-fast nos workers (Fase 10)
+- hardening: `KAFKA_ACKS`/`OTEL_TRACES_SAMPLER` configuráveis e `/healthz` com conectividade
+  real (Postgres + Kafka) + last-activity no relay (Fase 10, ver `TECHNICAL_REVIEW.md`)
 - CI/CD com GitHub Actions (check + integration + smoke + build-images → GHCR) (Fase 8)
 - Kubernetes local: Helm chart, kind + Kafka `apache/kafka` + Postgres, probes `/healthz`,
   migrations Job e **KEDA por lag** (Fase 9) — `make k8s-*`

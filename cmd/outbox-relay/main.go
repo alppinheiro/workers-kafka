@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strconv"
@@ -20,6 +20,7 @@ import (
 
 	"workers-kafka/internal/infrastructure/health"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
+	"workers-kafka/internal/infrastructure/logging"
 	"workers-kafka/internal/infrastructure/metrics"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 	"workers-kafka/internal/infrastructure/telemetry"
@@ -48,6 +49,7 @@ const (
 //	OUTBOX_BATCH_SIZE    (default 500)
 //	OUTBOX_POLL_INTERVAL (default 250ms)
 func main() {
+	logging.Setup("outbox-relay")
 	brokers := infrakafka.BrokersFromEnv()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -55,13 +57,15 @@ func main() {
 
 	shutdown, err := telemetry.Init("outbox-relay")
 	if err != nil {
-		log.Fatalf("outbox-relay: falha ao inicializar telemetria: %v", err)
+		slog.Error("falha ao inicializar telemetria", "error", err)
+		os.Exit(1)
 	}
 	defer func() { _ = shutdown(ctx) }()
 
 	pool, err := infrapostgres.Connect(ctx, infrapostgres.DatabaseURLFromEnv())
 	if err != nil {
-		log.Fatalf("outbox-relay: %v", err)
+		slog.Error("falha ao conectar no postgres", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
@@ -115,22 +119,22 @@ func main() {
 			case <-ticker.C:
 				removed, err := outbox.PurgePublished(ctx, purgeAfter)
 				if err != nil {
-					log.Printf("outbox-relay: erro na purga: %v", err)
+					slog.Error("erro na purga da outbox", "error", err)
 					continue
 				}
 				if removed > 0 {
-					log.Printf("outbox-relay: purga removida=%d older_than=%s", removed, purgeAfter)
+					slog.Info("purga da outbox", "removida", removed, "older_than", purgeAfter)
 				}
 			}
 		}
 	}()
 
-	log.Printf("outbox-relay: iniciado batch_size=%d poll_backoff=%s", batchSize, pollBackoff)
+	slog.Info("outbox-relay iniciado", "batch_size", batchSize, "poll_backoff", pollBackoff)
 	for {
 		n, err := relayOnce(ctx, outbox, producer, batchSize)
 		lastActivity.Store(time.Now().UnixNano())
 		if err != nil {
-			log.Printf("outbox-relay: erro no ciclo: %v", err)
+			slog.Error("erro no ciclo do relay", "error", err)
 			if !sleepCtx(ctx, pollBackoff) {
 				return
 			}
@@ -201,7 +205,7 @@ func relayOnce(ctx context.Context, outbox *infrapostgres.OutboxRepository, prod
 		metrics.RecordOutboxPublished()
 	}
 
-	log.Printf("outbox-relay: ciclo publicados=%d duracao=%s", len(entries), time.Since(started))
+	slog.Info("ciclo do relay concluído", "publicados", len(entries), "duracao", time.Since(started))
 	return len(entries), nil
 }
 
@@ -229,7 +233,7 @@ func envInt(name string, def int) int {
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil {
-		log.Printf("outbox-relay: %s inválido (%q), usando default %d", name, raw, def)
+		slog.Warn("valor de ambiente inválido, usando default", "name", name, "raw", raw, "default", def)
 		return def
 	}
 	return n
@@ -243,7 +247,7 @@ func envDuration(name string, def time.Duration) time.Duration {
 	}
 	d, err := time.ParseDuration(raw)
 	if err != nil {
-		log.Printf("outbox-relay: %s inválido (%q), usando default %s", name, raw, def)
+		slog.Warn("valor de ambiente inválido, usando default", "name", name, "raw", raw, "default", def)
 		return def
 	}
 	return d

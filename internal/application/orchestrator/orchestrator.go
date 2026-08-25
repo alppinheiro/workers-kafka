@@ -3,7 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"workers-kafka/internal/application"
@@ -58,7 +58,8 @@ func (o *Orchestrator) startOrder(ctx context.Context, tx application.SagaTx, ev
 		return err
 	}
 
-	log.Printf("component=orchestrator phase=decision action=start order_id=%s saga_id=%s state_current=%s retry_count=%d", event.OrderID, event.OrderID, domain.StatusPending, 0)
+	slog.InfoContext(ctx, "saga iniciada", "component", "orchestrator", "phase", "decision", "action", "start",
+		"order_id", event.OrderID, "saga_id", event.OrderID, "state_current", domain.StatusPending, "retry_count", 0)
 	return o.dispatchNext(ctx, tx, &saga)
 }
 
@@ -66,7 +67,8 @@ func (o *Orchestrator) startOrder(ctx context.Context, tx application.SagaTx, ev
 // pedido e delega os demais eventos para HandleResult.
 func (o *Orchestrator) HandleEvent(ctx context.Context, event domain.Event) error {
 	if event.EventType == domain.EventOrderCreated {
-		log.Printf("component=orchestrator phase=decision action=handle-created order_id=%s saga_id=%s event_id=%s type=%s", event.OrderID, event.SagaID, event.EventID, event.EventType)
+		slog.InfoContext(ctx, "evento de criação recebido", "component", "orchestrator", "phase", "decision", "action", "handle-created",
+			"order_id", event.OrderID, "saga_id", event.SagaID, "event_id", event.EventID, "type", event.EventType)
 		return o.StartOrder(ctx, event)
 	}
 	return o.HandleResult(ctx, event)
@@ -121,17 +123,22 @@ func (o *Orchestrator) handleResult(ctx context.Context, tx application.SagaTx, 
 
 	switch event.StatusAtual {
 	case domain.StatusRetrying:
-		log.Printf("component=orchestrator phase=decision action=retry-requested order_id=%s saga_id=%s event_id=%s type=%s state_current=%s retry_count=%d metadata=%v", event.OrderID, event.SagaID, event.EventID, event.EventType, saga.Current, saga.RetryCount, event.Metadata)
+		slog.WarnContext(ctx, "retry solicitado", "component", "orchestrator", "phase", "decision", "action", "retry-requested",
+			"order_id", event.OrderID, "saga_id", event.SagaID, "event_id", event.EventID, "type", event.EventType,
+			"state_current", saga.Current, "retry_count", saga.RetryCount, "metadata", event.Metadata)
 		return o.retry(ctx, tx, &saga)
 	case domain.StatusFailed:
 		// special-case: notification failures do not change order outcome - treat as completed (notification requested but failed)
 		if event.EventType == domain.EventNotificationResult {
-			log.Printf("component=orchestrator phase=decision action=notification-failed-ignored order_id=%s saga_id=%s event_id=%s metadata=%v", event.OrderID, event.SagaID, event.EventID, event.Metadata)
+			slog.InfoContext(ctx, "resultado de notificação ignorado", "component", "orchestrator", "phase", "decision", "action", "notification-failed-ignored",
+				"order_id", event.OrderID, "saga_id", event.SagaID, "event_id", event.EventID, "metadata", event.Metadata)
 			meta := map[string]string{"notification_error": "true"}
 			return o.complete(ctx, tx, &saga, meta)
 		}
 
-		log.Printf("component=orchestrator phase=decision action=fail-requested order_id=%s saga_id=%s event_id=%s type=%s state_current=%s retry_count=%d metadata=%v", event.OrderID, event.SagaID, event.EventID, event.EventType, saga.Current, saga.RetryCount, event.Metadata)
+		slog.WarnContext(ctx, "falha solicitada", "component", "orchestrator", "phase", "decision", "action", "fail-requested",
+			"order_id", event.OrderID, "saga_id", event.SagaID, "event_id", event.EventID, "type", event.EventType,
+			"state_current", saga.Current, "retry_count", saga.RetryCount, "metadata", event.Metadata)
 		if event.EventType == domain.EventInventoryResult && saga.Current == domain.StatusPaymentApproved && saga.TransactionID != "" {
 			return o.startCompensation(ctx, tx, &saga)
 		}
@@ -144,7 +151,9 @@ func (o *Orchestrator) handleResult(ctx context.Context, tx application.SagaTx, 
 		}
 		return o.fail(ctx, tx, &saga, event.Metadata)
 	case domain.StatusPaymentApproved, domain.StatusInventoryReserved:
-		log.Printf("component=orchestrator phase=decision action=advance order_id=%s saga_id=%s event_id=%s type=%s from=%s to=%s retry_count=%d", event.OrderID, event.SagaID, event.EventID, event.EventType, saga.Current, event.StatusAtual, saga.RetryCount)
+		slog.InfoContext(ctx, "avanço de etapa", "component", "orchestrator", "phase", "decision", "action", "advance",
+			"order_id", event.OrderID, "saga_id", event.SagaID, "event_id", event.EventID, "type", event.EventType,
+			"from", saga.Current, "to", event.StatusAtual, "retry_count", saga.RetryCount)
 		saga.Previous = saga.Current
 		saga.Current = event.StatusAtual
 		saga.RetryCount = 0
@@ -157,13 +166,16 @@ func (o *Orchestrator) handleResult(ctx context.Context, tx application.SagaTx, 
 		}
 		return o.dispatchNext(ctx, tx, &saga)
 	case domain.StatusPaymentRefunded:
-		log.Printf("component=orchestrator phase=decision action=refund-completed order_id=%s saga_id=%s event_id=%s tx=%s", event.OrderID, event.SagaID, event.EventID, event.TransactionID)
+		slog.InfoContext(ctx, "estorno concluído", "component", "orchestrator", "phase", "decision", "action", "refund-completed",
+			"order_id", event.OrderID, "saga_id", event.SagaID, "event_id", event.EventID, "tx", event.TransactionID)
 		metadata := cloneMetadata(event.Metadata)
 		metadata["payment_refunded"] = "true"
 		metadata["transaction_id"] = event.TransactionID
 		return o.fail(ctx, tx, &saga, metadata)
 	case domain.StatusNotified:
-		log.Printf("component=orchestrator phase=decision action=complete-requested order_id=%s saga_id=%s event_id=%s type=%s state_current=%s", event.OrderID, event.SagaID, event.EventID, event.EventType, saga.Current)
+		slog.InfoContext(ctx, "conclusão solicitada", "component", "orchestrator", "phase", "decision", "action", "complete-requested",
+			"order_id", event.OrderID, "saga_id", event.SagaID, "event_id", event.EventID, "type", event.EventType,
+			"state_current", saga.Current)
 		return o.complete(ctx, tx, &saga, nil)
 	default:
 		return fmt.Errorf("%w: status inesperado recebido pelo orquestrador para o pedido %s: %s", application.ErrNonRetryable, event.OrderID, event.StatusAtual)
@@ -177,10 +189,12 @@ func (o *Orchestrator) retry(ctx context.Context, tx application.SagaTx, saga *d
 	if err := tx.Sagas.Save(ctx, *saga); err != nil {
 		return err
 	}
-	log.Printf("component=orchestrator phase=decision action=retrying order_id=%s saga_id=%s state_current=%s retry_count=%d", saga.OrderID, saga.OrderID, saga.Current, saga.RetryCount)
+	slog.WarnContext(ctx, "re-tentando etapa", "component", "orchestrator", "phase", "decision", "action", "retrying",
+		"order_id", saga.OrderID, "saga_id", saga.OrderID, "state_current", saga.Current, "retry_count", saga.RetryCount)
 	if saga.RetryCount > o.maxRetries {
 		metadata := map[string]string{"motivo": "retry_limit_exceeded"}
-		log.Printf("component=orchestrator phase=decision action=retry-limit-exceeded order_id=%s saga_id=%s state_current=%s retry_count=%d", saga.OrderID, saga.OrderID, saga.Current, saga.RetryCount)
+		slog.ErrorContext(ctx, "limite de retries excedido", "component", "orchestrator", "phase", "decision", "action", "retry-limit-exceeded",
+			"order_id", saga.OrderID, "saga_id", saga.OrderID, "state_current", saga.Current, "retry_count", saga.RetryCount)
 		// special-case: falhas de notificação não derrubam o pedido mesmo após esgotar o retry.
 		if saga.Current == domain.StatusInventoryReserved {
 			meta := map[string]string{"notification_error": "true", "motivo": "retry_limit_exceeded"}
@@ -204,7 +218,8 @@ func (o *Orchestrator) startCompensation(ctx context.Context, tx application.Sag
 	if err := tx.Sagas.Save(ctx, *saga); err != nil {
 		return err
 	}
-	log.Printf("component=orchestrator phase=decision action=start-compensation order_id=%s saga_id=%s tx=%s", saga.OrderID, saga.OrderID, saga.TransactionID)
+	slog.WarnContext(ctx, "iniciando compensação", "component", "orchestrator", "phase", "decision", "action", "start-compensation",
+		"order_id", saga.OrderID, "saga_id", saga.OrderID, "tx", saga.TransactionID)
 	return o.dispatchNext(ctx, tx, saga)
 }
 
@@ -217,7 +232,8 @@ func (o *Orchestrator) fail(ctx context.Context, tx application.SagaTx, saga *do
 	if err := tx.Sagas.Save(ctx, *saga); err != nil {
 		return err
 	}
-	log.Printf("component=orchestrator phase=decision action=failed order_id=%s saga_id=%s from=%s to=%s metadata=%v", saga.OrderID, saga.OrderID, previousStatus, domain.StatusFailed, metadata)
+	slog.ErrorContext(ctx, "saga falhou", "component", "orchestrator", "phase", "decision", "action", "failed",
+		"order_id", saga.OrderID, "saga_id", saga.OrderID, "from", previousStatus, "to", domain.StatusFailed, "metadata", metadata)
 
 	terminal := terminalEvent(saga.OrderID, previousStatus, domain.StatusFailed, domain.EventOrderFailed, metadata)
 	if err := o.logEvent(ctx, tx, *saga, terminal.EventID, domain.EventOrderFailed, application.DirectionOut, domain.StatusFailed, terminal, nil, nil); err != nil {
@@ -235,7 +251,8 @@ func (o *Orchestrator) complete(ctx context.Context, tx application.SagaTx, saga
 	if err := tx.Sagas.Save(ctx, *saga); err != nil {
 		return err
 	}
-	log.Printf("component=orchestrator phase=decision action=publishing-completed order_id=%s saga_id=%s from=%s to=%s metadata=%v", saga.OrderID, saga.OrderID, domain.StatusNotified, domain.StatusCompleted, metadata)
+	slog.InfoContext(ctx, "publicando conclusão", "component", "orchestrator", "phase", "decision", "action", "publishing-completed",
+		"order_id", saga.OrderID, "saga_id", saga.OrderID, "from", domain.StatusNotified, "to", domain.StatusCompleted, "metadata", metadata)
 
 	terminal := terminalEvent(saga.OrderID, domain.StatusNotified, domain.StatusCompleted, domain.EventOrderCompleted, metadata)
 	if err := o.logEvent(ctx, tx, *saga, terminal.EventID, domain.EventOrderCompleted, application.DirectionOut, domain.StatusCompleted, terminal, nil, nil); err != nil {
@@ -250,7 +267,8 @@ func (o *Orchestrator) complete(ctx context.Context, tx application.SagaTx, saga
 	if err := tx.Sagas.Save(ctx, *saga); err != nil {
 		return err
 	}
-	log.Printf("component=orchestrator phase=decision action=completed order_id=%s saga_id=%s state_current=%s", saga.OrderID, saga.OrderID, saga.Current)
+	slog.InfoContext(ctx, "saga completada", "component", "orchestrator", "phase", "decision", "action", "completed",
+		"order_id", saga.OrderID, "saga_id", saga.OrderID, "state_current", saga.Current)
 	return nil
 }
 
@@ -286,7 +304,9 @@ func (o *Orchestrator) dispatchNext(ctx context.Context, tx application.SagaTx, 
 		return err
 	}
 
-	log.Printf("component=orchestrator phase=decision action=dispatch-next order_id=%s saga_id=%s event_type=%s status_previous=%s status_current=%s retry_count=%d", saga.OrderID, saga.OrderID, eventType, command.StatusAnterior, command.StatusAtual, saga.RetryCount)
+	slog.InfoContext(ctx, "despachando próximo comando", "component", "orchestrator", "phase", "decision", "action", "dispatch-next",
+		"order_id", saga.OrderID, "saga_id", saga.OrderID, "event_type", eventType,
+		"status_previous", command.StatusAnterior, "status_current", command.StatusAtual, "retry_count", saga.RetryCount)
 
 	return tx.Publisher.Publish(ctx, command)
 }
@@ -322,7 +342,8 @@ func (o *Orchestrator) alreadyProcessed(ctx context.Context, tx application.Saga
 		return false, fmt.Errorf("erro ao verificar duplicidade do evento %s: %w", eventID, err)
 	}
 	if seen {
-		log.Printf("component=orchestrator phase=decision action=duplicate-ignored order_id=%s event_id=%s type=%s", orderID, eventID, eventType)
+		slog.InfoContext(ctx, "evento duplicado ignorado", "component", "orchestrator", "phase", "decision", "action", "duplicate-ignored",
+			"order_id", orderID, "event_id", eventID, "type", eventType)
 	}
 	return seen, nil
 }

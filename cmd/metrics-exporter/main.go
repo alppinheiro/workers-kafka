@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net"
 	"os"
 	"os/signal"
@@ -14,6 +14,7 @@ import (
 
 	"workers-kafka/internal/infrastructure/health"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
+	"workers-kafka/internal/infrastructure/logging"
 	"workers-kafka/internal/infrastructure/metrics"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 )
@@ -30,12 +31,14 @@ var (
 )
 
 func main() {
+	logging.Setup("metrics-exporter")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	pool, err := infrapostgres.Connect(ctx, infrapostgres.DatabaseURLFromEnv())
 	if err != nil {
-		log.Fatalf("metrics-exporter: %v", err)
+		slog.Error("falha ao conectar no postgres", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
@@ -44,12 +47,12 @@ func main() {
 	client := &kafkago.Client{Addr: addr, Timeout: 10 * time.Second}
 
 	metrics.ServeWithChecks(":9107", health.Postgres(pool), health.Kafka(brokers))
-	log.Println("metrics-exporter: aguardando métricas do postgres/kafka")
+	slog.Info("metrics-exporter: aguardando métricas do postgres/kafka")
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("metrics-exporter: encerrado")
+			slog.Info("metrics-exporter: encerrado")
 			return
 		case <-time.After(refreshInterval):
 			refreshSagas(ctx, pool)
@@ -64,7 +67,7 @@ func main() {
 func refreshSagas(ctx context.Context, pool *pgxpool.Pool) {
 	rows, err := pool.Query(ctx, `SELECT current_status, count(*) FROM sagas GROUP BY current_status`)
 	if err != nil {
-		log.Printf("metrics-exporter: erro ao consultar sagas: %v", err)
+		slog.Error("erro ao consultar sagas", "error", err)
 		return
 	}
 	defer rows.Close()
@@ -75,7 +78,7 @@ func refreshSagas(ctx context.Context, pool *pgxpool.Pool) {
 		var status string
 		var n int
 		if err := rows.Scan(&status, &n); err != nil {
-			log.Printf("metrics-exporter: erro ao ler linha: %v", err)
+			slog.Error("erro ao ler linha de sagas", "error", err)
 			return
 		}
 		switch status {
@@ -100,7 +103,7 @@ func refreshOutboxAge(ctx context.Context, pool *pgxpool.Pool) {
 		`SELECT COALESCE(EXTRACT(EPOCH FROM (now() - MIN(created_at))), 0) FROM outbox WHERE published_at IS NULL`,
 	).Scan(&seconds)
 	if err != nil {
-		log.Printf("metrics-exporter: erro ao consultar idade da outbox: %v", err)
+		slog.Error("erro ao consultar idade da outbox", "error", err)
 		return
 	}
 	metrics.SetOutboxMaxAge(seconds)
@@ -124,7 +127,7 @@ func refreshConsumerLag(ctx context.Context, client *kafkago.Client, addr net.Ad
 	}
 	endResp, err := client.ListOffsets(ctx, offsetsReq)
 	if err != nil {
-		log.Printf("metrics-exporter: erro ao ler fim dos tópicos: %v", err)
+		slog.Error("erro ao ler fim dos tópicos", "error", err)
 		return
 	}
 
@@ -135,7 +138,7 @@ func refreshConsumerLag(ctx context.Context, client *kafkago.Client, addr net.Ad
 		}
 		fetchResp, err := client.OffsetFetch(ctx, &kafkago.OffsetFetchRequest{Addr: addr, GroupID: group, Topics: topicsReq})
 		if err != nil {
-			log.Printf("metrics-exporter: erro ao ler offsets do grupo %s: %v", group, err)
+			slog.Error("erro ao ler offsets do grupo", "group", group, "error", err)
 			continue
 		}
 

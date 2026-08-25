@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -160,9 +160,9 @@ func (c *Consumer) consumeWorker(ctx context.Context, handler application.EventH
 			if fetchCtx.Err() != nil {
 				// Stall detectado pelo watchdog: reconecta o reader (self-healing).
 				_ = flush()
-				log.Printf("component=consumer phase=reconnect service=%s", c.serviceName)
+				slog.Info("reconectando reader", "component", "consumer", "phase", "reconnect", "service", c.serviceName)
 				if closeErr := reader.Close(); closeErr != nil {
-					log.Printf("component=consumer phase=reconnect-close error=%v", closeErr)
+					slog.Error("erro ao fechar reader", "component", "consumer", "phase", "reconnect-close", "error", closeErr)
 				}
 				close(stallStop)
 				reader = newReader()
@@ -172,7 +172,8 @@ func (c *Consumer) consumeWorker(ctx context.Context, handler application.EventH
 				continue
 			}
 			if shouldRetryFetch(err) {
-				log.Printf("component=consumer phase=retry-fetch delay=%s error=%v", consumerRetryDelay, err)
+				slog.Warn("erro de fetch transitório, retentando",
+					"component", "consumer", "phase", "retry-fetch", "delay", consumerRetryDelay, "error", err)
 				if waitErr := waitForRetry(ctx, consumerRetryDelay); waitErr != nil {
 					_ = flush()
 					return waitErr
@@ -193,6 +194,21 @@ func (c *Consumer) consumeWorker(ctx context.Context, handler application.EventH
 				continue
 			}
 			return fmt.Errorf("erro ao desserializar evento: %w", err)
+		}
+
+		// Validação de contrato: evento com schema_version desconhecido (≠ CurrentSchemaVersion)
+		// é movido para a DLQ em vez de ser processado silenciosamente com payload incompleto —
+		// evita falhas estranhas quando um producer novo publica um contrato incompatível
+		// (o json.Unmarshal preencheria campos faltantes com zero e ignoraria campos novos).
+		if err := validateSchemaVersion(event); err != nil {
+			moved, moveErr := c.moveToDLQ(ctx, reader, msg, fmt.Errorf("%w: %v", application.ErrNonRetryable, err))
+			if moveErr != nil {
+				return moveErr
+			}
+			if moved {
+				continue
+			}
+			return err
 		}
 
 		// Propaga o trace (W3C traceparent) dos headers e abre um span por evento.
@@ -228,9 +244,9 @@ func (c *Consumer) consumeWorker(ctx context.Context, handler application.EventH
 			if err := flush(); err != nil {
 				// Não-fatal: a mensagem não commitada será reprocessada (idempotência).
 				if shouldRetryCommit(err) {
-					log.Printf("component=consumer phase=commit-retry error=%v", err)
+					slog.Warn("commit falhou, será re-tentado", "component", "consumer", "phase", "commit-retry", "error", err)
 				} else {
-					log.Printf("component=consumer phase=commit-error error=%v", err)
+					slog.Error("erro no commit de offsets", "component", "consumer", "phase", "commit-error", "error", err)
 				}
 			}
 		}
@@ -263,15 +279,27 @@ func (c *Consumer) moveToDLQ(ctx context.Context, reader *kafkago.Reader, msg ka
 		return false, fmt.Errorf("erro ao mover mensagem para a DLQ %s: %w", dlqTopic, writeErr)
 	}
 
-	log.Printf("component=consumer phase=dlq topic=%s dlq_topic=%s offset=%d error=%v", msg.Topic, dlqTopic, msg.Offset, err)
+	slog.Warn("mensagem movida para DLQ",
+		"component", "consumer", "phase", "dlq", "topic", msg.Topic, "dlq_topic", dlqTopic, "offset", msg.Offset, "error", err)
 	metrics.RecordDLQ(msg.Topic)
 
 	// O commit da mensagem movida pode falhar transitoriamente (ex.: tópico recriado).
 	// Não é fatal: a mensagem será reprocessada (idempotência) e re-movida.
 	if commitErr := reader.CommitMessages(ctx, msg); commitErr != nil {
-		log.Printf("component=consumer phase=dlq-commit-error topic=%s error=%v", msg.Topic, commitErr)
+		slog.Error("erro ao commitar mensagem movida para DLQ", "component", "consumer", "phase", "dlq-commit-error", "topic", msg.Topic, "error", commitErr)
 	}
 	return true, nil
+}
+
+// validateSchemaVersion garante que o evento use o contrato atual (schema_version == 1).
+// Retorna erro definitivo quando o schema é desconhecido — o consumer deve mover o evento
+// para a DLQ em vez de processar silenciosamente um payload que pode estar incompleto.
+func validateSchemaVersion(event domain.Event) error {
+	if event.SchemaVersion != domain.CurrentSchemaVersion {
+		return fmt.Errorf("schema_version %d não suportado (esperado %d) para o evento %s do pedido %s",
+			event.SchemaVersion, domain.CurrentSchemaVersion, event.EventID, event.OrderID)
+	}
+	return nil
 }
 
 // extractTraceContext recupera o contexto de trace (W3C traceparent) dos headers do Kafka.
@@ -339,8 +367,9 @@ func (c *Consumer) watchdogStall(reader *kafkago.Reader, cancel context.CancelFu
 				continue
 			}
 			if stallDetected(stats.Fetches, lastFetches, now.Sub(lastProgress), stallTimeout) {
-				log.Printf("component=consumer phase=stall-detected service=%s fetches=%d lag=%d sem_progresso=%s",
-					c.serviceName, stats.Fetches, stats.Lag, now.Sub(lastProgress).Round(time.Second))
+				slog.Warn("reader travado detectado",
+					"component", "consumer", "phase", "stall-detected", "service", c.serviceName,
+					"fetches", stats.Fetches, "lag", stats.Lag, "sem_progresso", now.Sub(lastProgress).Round(time.Second))
 				cancel()
 				lastProgress = now
 			}

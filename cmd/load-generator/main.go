@@ -5,13 +5,15 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
+	"os"
 	"time"
 
 	kafkago "github.com/segmentio/kafka-go"
 
 	"workers-kafka/internal/domain"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
+	"workers-kafka/internal/infrastructure/logging"
 )
 
 // load-generator publica N eventos ORDER_CREATED no tópico orders.created em lotes,
@@ -21,6 +23,7 @@ import (
 //
 // Use para observar o backlog/lag e o throughput de processamento das sagas.
 func main() {
+	logging.Setup("load-generator")
 	count := flag.Int("count", 10000, "total de pedidos a publicar")
 	batch := flag.Int("batch", 500, "tamanho do lote por WriteMessages")
 	prefix := flag.String("prefix", "load", "prefixo do order_id")
@@ -54,7 +57,8 @@ func main() {
 			}
 			payload, err := json.Marshal(event)
 			if err != nil {
-				log.Fatalf("erro ao serializar evento: %v", err)
+				slog.Error("erro ao serializar evento", "error", err)
+				os.Exit(1)
 			}
 			msgs = append(msgs, kafkago.Message{
 				Topic: infrakafka.TopicOrderCreated,
@@ -65,10 +69,11 @@ func main() {
 		}
 
 		if err := writer.WriteMessages(ctx, msgs...); err != nil {
-			log.Fatalf("erro ao publicar lote: %v", err)
+			slog.Error("erro ao publicar lote", "error", err)
+			os.Exit(1)
 		}
 	}
 
 	elapsed := time.Since(start)
-	log.Printf("load-generator: %d pedidos publicados em %s (%.0f eventos/s)", published, elapsed, float64(published)/elapsed.Seconds())
+	slog.Info("load-generator finalizado", "pedidos_publicados", published, "duracao", elapsed, "eventos_por_segundo", float64(published)/elapsed.Seconds())
 }

@@ -2,7 +2,7 @@ package metrics
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -171,7 +171,7 @@ func ServeWithChecks(addr string, checks ...func(ctx context.Context) error) {
 			err := check(checkCtx)
 			cancel()
 			if err != nil {
-				log.Printf("component=healthz phase=failed addr=%s error=%v", addr, err)
+				slog.Error("healthz falhou", "component", "healthz", "phase", "failed", "addr", addr, "error", err)
 				http.Error(w, err.Error(), http.StatusServiceUnavailable)
 				return
 			}
@@ -182,8 +182,8 @@ func ServeWithChecks(addr string, checks ...func(ctx context.Context) error) {
 	srv := &http.Server{Addr: addr, Handler: mux}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("component=metrics addr=%s error=%v", addr, err)
+			slog.Error("servidor de métricas encerrou com erro", "component", "metrics", "addr", addr, "error", err)
 		}
 	}()
-	log.Printf("component=metrics phase=started addr=%s", addr)
+	slog.Info("métricas iniciadas", "component", "metrics", "phase", "started", "addr", addr)
 }

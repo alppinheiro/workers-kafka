@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,6 +10,7 @@ import (
 	"workers-kafka/internal/application/projector"
 	"workers-kafka/internal/infrastructure/health"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
+	"workers-kafka/internal/infrastructure/logging"
 	"workers-kafka/internal/infrastructure/metrics"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 	infrapostgresread "workers-kafka/internal/infrastructure/persistence/postgres_read"
@@ -20,6 +21,7 @@ import (
 // main sobe o projector: consome os cinco tópicos do barramento e mantém o read model
 // (order_views) no banco de leitura, com dedup por event_id.
 func main() {
+	logging.Setup("projector")
 	brokers := infrakafka.BrokersFromEnv()
 
 	dlq := infrakafka.NewDLQWriter(brokers)
@@ -46,13 +48,15 @@ func main() {
 
 	shutdown, err := telemetry.Init("projector")
 	if err != nil {
-		log.Fatalf("projector: falha ao inicializar telemetria: %v", err)
+		slog.Error("falha ao inicializar telemetria", "error", err)
+		os.Exit(1)
 	}
 	defer func() { _ = shutdown(ctx) }()
 
 	pool, err := infrapostgres.Connect(ctx, infrapostgresread.DatabaseURLFromEnv())
 	if err != nil {
-		log.Fatalf("projector: %v", err)
+		slog.Error("falha ao conectar no postgres", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
@@ -61,9 +65,10 @@ func main() {
 	views := infrapostgresread.NewOrderViewRepository(pool)
 	proj := projector.New(views)
 
-	log.Println("projector: aguardando eventos")
+	slog.Info("projector: aguardando eventos")
 	if err := consumer.Consume(ctx, interfaces.WithLogging("projector", proj.HandleEvent)); err != nil && ctx.Err() == nil {
-		log.Fatalf("projector: encerrado com erro: %v", err)
+		slog.Error("projector encerrou com erro", "error", err)
+		os.Exit(1)
 	}
-	log.Println("projector: encerrado")
+	slog.Info("projector: encerrado")
 }

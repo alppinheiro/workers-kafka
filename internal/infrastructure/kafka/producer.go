@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -44,28 +44,19 @@ func (p *Producer) Publish(ctx context.Context, event domain.Event) error {
 	}
 
 	startedAt := time.Now()
-	log.Printf("component=producer phase=publishing topic=%s event_id=%s order_id=%s saga_id=%s type=%s status_previous=%s status_current=%s schema_version=%d metadata=%s",
-		topic,
-		event.EventID,
-		event.OrderID,
-		event.SagaID,
-		event.EventType,
-		event.StatusAnterior,
-		event.StatusAtual,
-		event.SchemaVersion,
-		formatMetadata(event.Metadata),
+	slog.InfoContext(ctx, "publicando evento",
+		"component", "producer", "phase", "publishing", "topic", topic,
+		"event_id", event.EventID, "order_id", event.OrderID, "saga_id", event.SagaID,
+		"type", event.EventType, "status_previous", event.StatusAnterior, "status_current", event.StatusAtual,
+		"schema_version", event.SchemaVersion, "metadata", formatMetadata(event.Metadata),
 	)
 
 	payload, err := json.Marshal(event)
 	if err != nil {
-		log.Printf("component=producer phase=failed topic=%s event_id=%s order_id=%s saga_id=%s type=%s duration=%s error=%v",
-			topic,
-			event.EventID,
-			event.OrderID,
-			event.SagaID,
-			event.EventType,
-			time.Since(startedAt),
-			err,
+		slog.ErrorContext(ctx, "erro ao serializar evento",
+			"component", "producer", "phase", "failed", "topic", topic,
+			"event_id", event.EventID, "order_id", event.OrderID, "saga_id", event.SagaID,
+			"type", event.EventType, "duration", time.Since(startedAt), "error", err,
 		)
 		return fmt.Errorf("erro ao serializar evento %s: %w", event.EventID, err)
 	}
@@ -76,34 +67,28 @@ func (p *Producer) Publish(ctx context.Context, event domain.Event) error {
 		Value:   payload,
 		Headers: injectTraceHeaders(ctx),
 	}); err != nil {
-		log.Printf("component=producer phase=failed topic=%s event_id=%s order_id=%s saga_id=%s type=%s duration=%s error=%v",
-			topic,
-			event.EventID,
-			event.OrderID,
-			event.SagaID,
-			event.EventType,
-			time.Since(startedAt),
-			err,
+		slog.ErrorContext(ctx, "erro ao publicar evento",
+			"component", "producer", "phase", "failed", "topic", topic,
+			"event_id", event.EventID, "order_id", event.OrderID, "saga_id", event.SagaID,
+			"type", event.EventType, "duration", time.Since(startedAt), "error", err,
 		)
 		return err
 	}
 	metrics.RecordPublished(p.serviceName, topic)
 
-	log.Printf("component=producer phase=published topic=%s event_id=%s order_id=%s saga_id=%s type=%s status_previous=%s status_current=%s payload_bytes=%d duration=%s",
-		topic,
-		event.EventID,
-		event.OrderID,
-		event.SagaID,
-		event.EventType,
-		event.StatusAnterior,
-		event.StatusAtual,
-		len(payload),
-		time.Since(startedAt),
+	slog.InfoContext(ctx, "evento publicado",
+		"component", "producer", "phase", "published", "topic", topic,
+		"event_id", event.EventID, "order_id", event.OrderID, "saga_id", event.SagaID,
+		"type", event.EventType, "status_previous", event.StatusAnterior, "status_current", event.StatusAtual,
+		"payload_bytes", len(payload), "duration", time.Since(startedAt),
 	)
 
-	// Also log transaction id when present for better observability
+	// Loga também o transaction_id quando presente para melhor observabilidade.
 	if event.TransactionID != "" {
-		log.Printf("component=producer transaction_id=%s event_id=%s order_id=%s type=%s", event.TransactionID, event.EventID, event.OrderID, event.EventType)
+		slog.InfoContext(ctx, "evento com transação",
+			"component", "producer", "transaction_id", event.TransactionID,
+			"event_id", event.EventID, "order_id", event.OrderID, "type", event.EventType,
+		)
 	}
 
 	return nil

@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,6 +11,7 @@ import (
 	"workers-kafka/internal/infrastructure/external"
 	"workers-kafka/internal/infrastructure/health"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
+	"workers-kafka/internal/infrastructure/logging"
 	"workers-kafka/internal/infrastructure/metrics"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 	"workers-kafka/internal/infrastructure/telemetry"
@@ -20,6 +21,7 @@ import (
 
 // main sobe o worker de estoque, consumindo comandos do tópico orders.inventory e publicando o resultado.
 func main() {
+	logging.Setup("worker-inventory")
 	brokers := infrakafka.BrokersFromEnv()
 
 	dlq := infrakafka.NewDLQWriter(brokers)
@@ -42,13 +44,15 @@ func main() {
 
 	shutdown, err := telemetry.Init("worker-inventory")
 	if err != nil {
-		log.Fatalf("worker de estoque: falha ao inicializar telemetria: %v", err)
+		slog.Error("falha ao inicializar telemetria", "error", err)
+		os.Exit(1)
 	}
 	defer func() { _ = shutdown(ctx) }()
 
 	pool, err := infrapostgres.Connect(ctx, infrapostgres.DatabaseURLFromEnv())
 	if err != nil {
-		log.Fatalf("worker de estoque: %v", err)
+		slog.Error("falha ao conectar no postgres", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
@@ -56,9 +60,10 @@ func main() {
 
 	useCase := worker.NewInventoryUseCase(external.InventoryGatewayFromEnv(gateway), uow.New(pool))
 
-	log.Println("worker de estoque: aguardando comandos")
+	slog.Info("worker de estoque: aguardando comandos")
 	if err := consumer.Consume(ctx, interfaces.WithLogging("worker-inventory", useCase.Handle)); err != nil && ctx.Err() == nil {
-		log.Fatalf("worker de estoque: encerrado com erro: %v", err)
+		slog.Error("worker de estoque encerrou com erro", "error", err)
+		os.Exit(1)
 	}
-	log.Println("worker de estoque: encerrado")
+	slog.Info("worker de estoque: encerrado")
 }

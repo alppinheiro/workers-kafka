@@ -2,7 +2,7 @@ package telemetry
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"strconv"
 
@@ -50,7 +50,7 @@ func Init(serviceName string) (func(context.Context) error, error) {
 		propagation.Baggage{},
 	))
 
-	log.Printf("component=telemetry phase=started service=%s endpoint=%s", serviceName, endpoint)
+	slog.Info("telemetria iniciada", "component", "telemetry", "phase", "started", "service", serviceName, "endpoint", endpoint)
 	return tp.Shutdown, nil
 }
 

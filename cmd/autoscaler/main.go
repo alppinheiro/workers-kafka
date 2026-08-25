@@ -3,18 +3,21 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
+
+	"workers-kafka/internal/infrastructure/logging"
 )
 
 // autoscaler é o análogo local do KEDA/HPA: monitora o lag de um consumer group e
 // ajusta o nº de réplicas via docker-compose scale. Roda no HOST (precisa de acesso
 // ao docker-compose). Em produção, esse papel é do KEDA ScaledObject no Kubernetes.
 func main() {
+	logging.Setup("autoscaler")
 	svc := env("AUTOSCALE_SERVICE", "orchestrator")
 	group := env("AUTOSCALE_GROUP", "orchestrator")
 	topic := env("AUTOSCALE_TOPIC", "orders.created")
@@ -31,14 +34,14 @@ func main() {
 	highCount := 0
 	var idleStart time.Time
 
-	log.Printf("autoscaler: iniciado svc=%s group=%s topic=%s min=%d max=%d high_lag=%d", svc, group, topic, minR, maxR, highLag)
+	slog.Info("autoscaler iniciado", "svc", svc, "group", group, "topic", topic, "min", minR, "max", maxR, "high_lag", highLag)
 
 	for {
 		time.Sleep(checkInterval)
 
 		lag, err := totalLag(ctx, group, topic)
 		if err != nil {
-			log.Printf("autoscaler: erro ao calcular lag: %v", err)
+			slog.Error("erro ao calcular lag", "error", err)
 			continue
 		}
 
@@ -52,7 +55,7 @@ func main() {
 					replicas = maxR
 				}
 				if err := scaleService(svc, replicas); err != nil {
-					log.Printf("autoscaler: erro ao escalar: %v", err)
+					slog.Error("erro ao escalar", "error", err)
 				}
 				highCount = 0
 			}
@@ -67,7 +70,7 @@ func main() {
 					replicas = minR
 				}
 				if err := scaleService(svc, replicas); err != nil {
-					log.Printf("autoscaler: erro ao reduzir: %v", err)
+					slog.Error("erro ao reduzir", "error", err)
 				}
 				idleStart = time.Time{}
 			}
@@ -76,7 +79,7 @@ func main() {
 			idleStart = time.Time{}
 		}
 
-		log.Printf("autoscaler: svc=%s lag=%d replicas=%d high_count=%d", svc, lag, replicas, highCount)
+		slog.Info("estado do autoscaler", "svc", svc, "lag", lag, "replicas", replicas, "high_count", highCount)
 	}
 }
 
@@ -110,7 +113,7 @@ func scaleService(svc string, replicas int) error {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("%v: %s", err, string(out))
 	}
-	log.Printf("autoscaler: action=scale svc=%s replicas=%d", svc, replicas)
+	slog.Info("ação de scale", "action", "scale", "svc", svc, "replicas", replicas)
 	return nil
 }
 

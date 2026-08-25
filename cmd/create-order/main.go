@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 
 	"go.opentelemetry.io/otel"
@@ -11,14 +11,17 @@ import (
 
 	"workers-kafka/internal/application/worker"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
+	"workers-kafka/internal/infrastructure/logging"
 	"workers-kafka/internal/infrastructure/telemetry"
 )
 
 // main publica o evento inicial de um novo pedido (PENDING), disparando o início da saga.
 // Uso: go run ./cmd/create-order <order_id>
 func main() {
+	logging.Setup("create-order")
 	if len(os.Args) < 2 {
-		log.Fatal("uso: create-order <order_id>")
+		slog.Error("uso: create-order <order_id>")
+		os.Exit(1)
 	}
 	orderID := os.Args[1]
 
@@ -29,7 +32,8 @@ func main() {
 
 	shutdown, err := telemetry.Init("create-order")
 	if err != nil {
-		log.Fatalf("create-order: falha ao inicializar telemetria: %v", err)
+		slog.Error("falha ao inicializar telemetria", "error", err)
+		os.Exit(1)
 	}
 	defer func() { _ = shutdown(context.Background()) }()
 
@@ -42,8 +46,9 @@ func main() {
 
 	if err := coordinator.CreateOrder(ctx, orderID); err != nil {
 		span.RecordError(err)
-		log.Fatalf("erro ao criar pedido: %v", err)
+		slog.Error("erro ao criar pedido", "order_id", orderID, "error", err)
+		os.Exit(1)
 	}
 
-	log.Printf("pedido %s criado com status PENDING", orderID)
+	slog.Info("pedido criado", "order_id", orderID, "status", "PENDING")
 }

@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,6 +11,7 @@ import (
 	"workers-kafka/internal/infrastructure/external"
 	"workers-kafka/internal/infrastructure/health"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
+	"workers-kafka/internal/infrastructure/logging"
 	"workers-kafka/internal/infrastructure/metrics"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 	"workers-kafka/internal/infrastructure/telemetry"
@@ -20,6 +21,7 @@ import (
 
 // main sobe o worker de pagamento, consumindo comandos do tópico orders.payment e publicando o resultado.
 func main() {
+	logging.Setup("worker-payment")
 	brokers := infrakafka.BrokersFromEnv()
 
 	dlq := infrakafka.NewDLQWriter(brokers)
@@ -42,13 +44,15 @@ func main() {
 
 	shutdown, err := telemetry.Init("worker-payment")
 	if err != nil {
-		log.Fatalf("worker de pagamento: falha ao inicializar telemetria: %v", err)
+		slog.Error("falha ao inicializar telemetria", "error", err)
+		os.Exit(1)
 	}
 	defer func() { _ = shutdown(ctx) }()
 
 	pool, err := infrapostgres.Connect(ctx, infrapostgres.DatabaseURLFromEnv())
 	if err != nil {
-		log.Fatalf("worker de pagamento: %v", err)
+		slog.Error("falha ao conectar no postgres", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
@@ -56,9 +60,10 @@ func main() {
 
 	useCase := worker.NewPaymentUseCase(external.PaymentGatewayFromEnv(gateway), uow.New(pool))
 
-	log.Println("worker de pagamento: aguardando comandos")
+	slog.Info("worker de pagamento: aguardando comandos")
 	if err := consumer.Consume(ctx, interfaces.WithLogging("worker-payment", useCase.Handle)); err != nil && ctx.Err() == nil {
-		log.Fatalf("worker de pagamento: encerrado com erro: %v", err)
+		slog.Error("worker de pagamento encerrou com erro", "error", err)
+		os.Exit(1)
 	}
-	log.Println("worker de pagamento: encerrado")
+	slog.Info("worker de pagamento: encerrado")
 }

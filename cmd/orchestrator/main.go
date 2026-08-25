@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,6 +10,7 @@ import (
 	"workers-kafka/internal/application/orchestrator"
 	"workers-kafka/internal/infrastructure/health"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
+	"workers-kafka/internal/infrastructure/logging"
 	"workers-kafka/internal/infrastructure/metrics"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 	"workers-kafka/internal/infrastructure/telemetry"
@@ -21,6 +22,7 @@ import (
 // resultado (pagamento, estoque e notificação) sem depender de goroutines adicionais.
 // O estado da saga é persistido em PostgreSQL e as transições são registradas no journal.
 func main() {
+	logging.Setup("orchestrator")
 	brokers := infrakafka.BrokersFromEnv()
 
 	dlq := infrakafka.NewDLQWriter(brokers)
@@ -46,13 +48,15 @@ func main() {
 
 	shutdown, err := telemetry.Init("orchestrator")
 	if err != nil {
-		log.Fatalf("orquestrador: falha ao inicializar telemetria: %v", err)
+		slog.Error("falha ao inicializar telemetria", "error", err)
+		os.Exit(1)
 	}
 	defer func() { _ = shutdown(ctx) }()
 
 	pool, err := infrapostgres.Connect(ctx, infrapostgres.DatabaseURLFromEnv())
 	if err != nil {
-		log.Fatalf("orquestrador: %v", err)
+		slog.Error("falha ao conectar no postgres", "error", err)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
@@ -60,9 +64,10 @@ func main() {
 
 	orch := orchestrator.New(uow.New(pool), 3)
 
-	log.Println("orquestrador: aguardando eventos")
+	slog.Info("orquestrador: aguardando eventos")
 	if err := consumer.Consume(ctx, interfaces.WithLogging("orchestrator", orch.HandleEvent)); err != nil && ctx.Err() == nil {
-		log.Fatalf("orquestrador: encerrado com erro: %v", err)
+		slog.Error("orquestrador encerrou com erro", "error", err)
+		os.Exit(1)
 	}
-	log.Println("orquestrador: encerrado")
+	slog.Info("orquestrador: encerrado")
 }

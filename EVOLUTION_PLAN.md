@@ -198,15 +198,16 @@ gerenciados (ou self-hosted p/ reduzir custo) e observabilidade no cluster. Estr
   agressivo na tabela) para evitar bloat do `idx_outbox_pending`.
 - [x] **10.7.8** Circuit breaker nos gateways — `sony/gobreaker` na camada `infrastructure/external`
   (evita thread starvation quando um gateway degrada lentamente).
-- [ ] **10.7.9** Validação ativa de `schema_version` — consumer rejeita versões desconhecidas → DLQ
+- [x] **10.7.9** Validação ativa de `schema_version` — consumer rejeita versões desconhecidas → DLQ
   (exercício antes de Schema Registry/Avro).
-- [ ] **10.7.10** Logging estruturado com `log/slog` — saída JSON nativa (Loki/Datadog sem parser
+- [x] **10.7.10** Logging estruturado com `log/slog` — saída JSON nativa (Loki/Datadog sem parser
   customizado; hoje é `log.Printf` quase-structured).
 
-> Itens **10.7.1–10.7.5 e 10.7.8** aplicados junto com o relatório `TECHNICAL_REVIEW.md`
-> (10.7.4/10.7.5: probes reais + healthz do relay; 10.7.8: circuit breaker com
-> `GATEWAY_CB_*`). Restam **10.7.6 (Alertmanager), 10.7.7 (VACUUM/autovacuum),
-> 10.7.9 (schema_version) e 10.7.10 (slog)** — pré-requisitos de operação no EKS.
+> Itens **10.7.1–10.7.5 e 10.7.8–10.7.10** aplicados junto com o relatório
+> `TECHNICAL_REVIEW.md` (10.7.4/10.7.5: probes reais + healthz do relay; 10.7.8: circuit
+> breaker com `GATEWAY_CB_*`; 10.7.9: schema_version → DLQ; 10.7.10: logs JSON com slog).
+> Restam **10.7.6 (Alertmanager) e 10.7.7 (VACUUM/autovacuum)** — pré-requisitos de
+> operação no EKS (dependem do cluster).
 
 ---
 

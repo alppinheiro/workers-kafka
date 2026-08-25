@@ -3,7 +3,7 @@ package interfaces
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -17,45 +17,31 @@ import (
 func WithLogging(component string, next application.EventHandler) application.EventHandler {
 	return func(ctx context.Context, event domain.Event) error {
 		startedAt := time.Now()
-		log.Printf("component=%s phase=received event_id=%s order_id=%s saga_id=%s transaction_id=%s type=%s status_previous=%s status_current=%s schema_version=%d metadata=%s",
-			component,
-			event.EventID,
-			event.OrderID,
-			event.SagaID,
-			event.TransactionID,
-			event.EventType,
-			event.StatusAnterior,
-			event.StatusAtual,
-			event.SchemaVersion,
-			formatMetadata(event.Metadata),
+		slog.InfoContext(ctx, "evento recebido",
+			"component", component, "phase", "received",
+			"event_id", event.EventID, "order_id", event.OrderID, "saga_id", event.SagaID,
+			"transaction_id", event.TransactionID, "type", event.EventType,
+			"status_previous", event.StatusAnterior, "status_current", event.StatusAtual,
+			"schema_version", event.SchemaVersion, "metadata", formatMetadata(event.Metadata),
 		)
 
 		if err := next(ctx, event); err != nil {
-			log.Printf("component=%s phase=failed event_id=%s order_id=%s saga_id=%s transaction_id=%s type=%s status_previous=%s status_current=%s duration=%s error=%v",
-				component,
-				event.EventID,
-				event.OrderID,
-				event.SagaID,
-				event.TransactionID,
-				event.EventType,
-				event.StatusAnterior,
-				event.StatusAtual,
-				time.Since(startedAt),
-				err,
+			slog.ErrorContext(ctx, "evento falhou",
+				"component", component, "phase", "failed",
+				"event_id", event.EventID, "order_id", event.OrderID, "saga_id", event.SagaID,
+				"transaction_id", event.TransactionID, "type", event.EventType,
+				"status_previous", event.StatusAnterior, "status_current", event.StatusAtual,
+				"duration", time.Since(startedAt), "error", err,
 			)
 			return err
 		}
 
-		log.Printf("component=%s phase=processed event_id=%s order_id=%s saga_id=%s transaction_id=%s type=%s status_previous=%s status_current=%s duration=%s",
-			component,
-			event.EventID,
-			event.OrderID,
-			event.SagaID,
-			event.TransactionID,
-			event.EventType,
-			event.StatusAnterior,
-			event.StatusAtual,
-			time.Since(startedAt),
+		slog.InfoContext(ctx, "evento processado",
+			"component", component, "phase", "processed",
+			"event_id", event.EventID, "order_id", event.OrderID, "saga_id", event.SagaID,
+			"transaction_id", event.TransactionID, "type", event.EventType,
+			"status_previous", event.StatusAnterior, "status_current", event.StatusAtual,
+			"duration", time.Since(startedAt),
 		)
 
 		return nil

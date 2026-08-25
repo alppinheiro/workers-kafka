@@ -364,6 +364,18 @@ de ambiente (12-factor):
 - **K8s**: `ConfigMap` + `Secret` via Helm (`values*.yaml`).
 - O `.env.example` documenta tudo; o `.env` real é **gitignored**.
 
+**Variáveis de tuning (defaults no `.env.example`):**
+
+| Variável | Default | O que controla |
+|---|---|---|
+| `SAGA_WORKERS` | `1` | goroutines de consumo no mesmo group (concorrência intra-instância) |
+| `KAFKA_COMMIT_BATCH` | `50` | mensagens antes do commit de offsets em lote |
+| `KAFKA_COMMIT_INTERVAL` | `200ms` | intervalo máximo entre commits |
+| `KAFKA_ACKS` | `all` | durabilidade do producer (`all` = leader+ISR; `one` = só leader, throughput) |
+| `OUTBOX_BATCH_SIZE` | `500` | lote do outbox-relay |
+| `OTEL_TRACES_SAMPLER` (+ `ARG`) | `parentbased_always_on` | amostragem de traces (produção: `parentbased_traceidratio` + `ARG=0.1`) |
+| `GATEWAY_CB_ENABLED` / `_MAX_FAILURES` / `_TIMEOUT` | `true` / `5` / `10s` | circuit breaker dos gateways (fail-fast em falhas consecutivas) |
+
 ### 9.2 Portas expostas (compose)
 
 | Serviço | Host | Observação |
@@ -491,6 +503,11 @@ saga_orders_pending
 **Alertas** (`prometheus/rules.yml`): `SagaDLQGrowth` (DLQ crescendo) e
 `SagaConsumerStalled` (sem progresso com lag).
 
+**Probes de saúde (`/healthz`, portas 9101–9107):** cada serviço responde `200` somente com
+conectividade real — `health.Postgres` (Ping/`SELECT 1`) e `health.Kafka` (dial+handshake);
+o `outbox-relay` adiciona `health.LastActivity` (503 se o loop principal ficar sem concluir
+um ciclo por 30s). Dependência inacessível → `503` com o motivo (usado nas probes do K8s).
+
 ### 11.2 Traces (OpenTelemetry + Jaeger)
 
 - Cada evento consumido gera um span (`consume <EVENT_TYPE>`); o `traceparent` (W3C)
@@ -500,10 +517,17 @@ saga_orders_pending
 
 ### 11.3 Logs correlacionados
 
-Todos os logs trazem `order_id`, `saga_id`, `event_id` e `phase`:
-```
-component=orchestrator phase=decision action=dispatch-next order_id=... type=PAYMENT_COMMAND
-component=worker-payment phase=processed event_id=... order_id=... type=PAYMENT_RESULT duration=...
+Todos os logs trazem `order_id`, `saga_id`, `event_id` e `phase`. Desde o hardening
+(Fase 10) a saída é **JSON estruturado** (`log/slog`, handler JSON) — CloudWatch/Loki
+leem sem parser customizado:
+
+```json
+{"time":"...","level":"INFO","msg":"despachando próximo comando","service":"orchestrator",
+ "component":"orchestrator","phase":"decision","action":"dispatch-next",
+ "order_id":"order-1","event_type":"PAYMENT_COMMAND","status_current":"PAYMENT_PENDING"}
+{"time":"...","level":"INFO","msg":"evento processado","service":"worker-payment",
+ "phase":"processed","event_id":"...","order_id":"order-1","type":"PAYMENT_RESULT",
+ "duration":0.000024}
 ```
 
 ### 11.4 Dashboard "Saga - Visão Geral" (Grafana)
@@ -528,7 +552,7 @@ outbox pendente/idade, DLQ e lag por consumer group. Provisionado no compose
 | `ImagePullBackOff` | imagem não existe / privada | checar tag (`ghcr.io/<owner>/workers-kafka-<svc>:<tag>`); tornar pacote público ou criar `imagePullSecret` |
 | `CreateContainerConfigError` | env/secret ausente | `kubectl describe pod` → detalhe do erro; conferir `ConfigMap`/`Secret` |
 | `Pending` | PVC/sem recursos | `kubectl describe pod` → evento; checar `kubectl get pvc` (Bound?) e recursos do node |
-| `Running 0/1` (readiness falhando) | probe `/healthz` não responde | `curl localhost:<porta>/healthz` no pod; checar se o serviço subiu; porta errada no `values.yaml` (ver §9.2) |
+| `Running 0/1` (readiness falhando) | probe `/healthz` não responde ou retorna `503` | `curl localhost:<porta>/healthz` no pod; `503` = dependência inacessível (Postgres/Kafka) — ver logs do componente; `404/erro de conexão` = serviço não subiu ou porta errada no `values.yaml` (ver §9.2) |
 | reiniciando em loop (compose) | dependência não subiu ainda | `restart: unless-stopped` resolve sozinho; aguardar Kafka/Postgres `healthy` |
 
 **Comandos:**
