@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"workers-kafka/internal/application/orchestrator"
+	"workers-kafka/internal/infrastructure/health"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
 	"workers-kafka/internal/infrastructure/metrics"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
@@ -49,13 +50,13 @@ func main() {
 	}
 	defer func() { _ = shutdown(ctx) }()
 
-	metrics.Serve(":9101")
-
 	pool, err := infrapostgres.Connect(ctx, infrapostgres.DatabaseURLFromEnv())
 	if err != nil {
 		log.Fatalf("orquestrador: %v", err)
 	}
 	defer pool.Close()
+
+	metrics.ServeWithChecks(":9101", health.Postgres(pool), health.Kafka(brokers))
 
 	orch := orchestrator.New(uow.New(pool), 3)
 

@@ -9,6 +9,7 @@ import (
 
 	"workers-kafka/internal/application/worker"
 	"workers-kafka/internal/infrastructure/external"
+	"workers-kafka/internal/infrastructure/health"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
 	"workers-kafka/internal/infrastructure/metrics"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
@@ -45,15 +46,15 @@ func main() {
 	}
 	defer func() { _ = shutdown(ctx) }()
 
-	metrics.Serve(":9103")
-
 	pool, err := infrapostgres.Connect(ctx, infrapostgres.DatabaseURLFromEnv())
 	if err != nil {
 		log.Fatalf("worker de estoque: %v", err)
 	}
 	defer pool.Close()
 
-	useCase := worker.NewInventoryUseCase(gateway, uow.New(pool))
+	metrics.ServeWithChecks(":9103", health.Postgres(pool), health.Kafka(brokers))
+
+	useCase := worker.NewInventoryUseCase(external.InventoryGatewayFromEnv(gateway), uow.New(pool))
 
 	log.Println("worker de estoque: aguardando comandos")
 	if err := consumer.Consume(ctx, interfaces.WithLogging("worker-inventory", useCase.Handle)); err != nil && ctx.Err() == nil {

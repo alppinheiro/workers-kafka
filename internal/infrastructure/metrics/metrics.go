@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"time"
@@ -146,11 +147,35 @@ func SetConsumerLag(group, topic string, n int64) {
 
 // Serve inicia (em goroutine) um servidor HTTP com /metrics e /healthz na porta indicada.
 // O /healthz permite liveness/readiness probes no Kubernetes (Fase 9) sem expor outro
-// endpoint de health nos serviços.
+// endpoint de health nos serviços. Comportamento histórico: responde 200 incondicional.
 func Serve(addr string) {
+	ServeWithChecks(addr)
+}
+
+// HealthCheck verifica a saúde de uma dependência; retorna erro quando indisponível.
+type HealthCheck func(ctx context.Context) error
+
+// healthTimeout limita cada check do /healthz para a probe nunca travar o servidor.
+const healthTimeout = 3 * time.Second
+
+// ServeWithChecks inicia o servidor HTTP de /metrics e /healthz. Quando checks são
+// fornecidas, o /healthz executa cada uma (com timeout) e responde 503 se qualquer
+// uma falhar — readiness real (conectividade Kafka/Postgres, stall de loop) em vez
+// do 200 incondicional.
+func ServeWithChecks(addr string, checks ...func(ctx context.Context) error) {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		for _, check := range checks {
+			checkCtx, cancel := context.WithTimeout(r.Context(), healthTimeout)
+			err := check(checkCtx)
+			cancel()
+			if err != nil {
+				log.Printf("component=healthz phase=failed addr=%s error=%v", addr, err)
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})

@@ -9,6 +9,7 @@ import (
 
 	"workers-kafka/internal/application/worker"
 	"workers-kafka/internal/infrastructure/external"
+	"workers-kafka/internal/infrastructure/health"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
 	"workers-kafka/internal/infrastructure/metrics"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
@@ -45,15 +46,15 @@ func main() {
 	}
 	defer func() { _ = shutdown(ctx) }()
 
-	metrics.Serve(":9104")
-
 	pool, err := infrapostgres.Connect(ctx, infrapostgres.DatabaseURLFromEnv())
 	if err != nil {
 		log.Fatalf("worker de notificação: %v", err)
 	}
 	defer pool.Close()
 
-	useCase := worker.NewNotificationUseCase(gateway, uow.New(pool))
+	metrics.ServeWithChecks(":9104", health.Postgres(pool), health.Kafka(brokers))
+
+	useCase := worker.NewNotificationUseCase(external.NotificationGatewayFromEnv(gateway), uow.New(pool))
 
 	log.Println("worker de notificação: aguardando comandos")
 	if err := consumer.Consume(ctx, interfaces.WithLogging("worker-notification", useCase.Handle)); err != nil && ctx.Err() == nil {

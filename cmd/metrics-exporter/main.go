@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	kafkago "github.com/segmentio/kafka-go"
 
+	"workers-kafka/internal/infrastructure/health"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
 	"workers-kafka/internal/infrastructure/metrics"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
@@ -42,7 +43,7 @@ func main() {
 	addr := kafkago.TCP(brokers...)
 	client := &kafkago.Client{Addr: addr, Timeout: 10 * time.Second}
 
-	metrics.Serve(":9107")
+	metrics.ServeWithChecks(":9107", health.Postgres(pool), health.Kafka(brokers))
 	log.Println("metrics-exporter: aguardando métricas do postgres/kafka")
 
 	for {

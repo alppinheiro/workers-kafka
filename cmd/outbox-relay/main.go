@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 
 	kafkago "github.com/segmentio/kafka-go"
 
+	"workers-kafka/internal/infrastructure/health"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
 	"workers-kafka/internal/infrastructure/metrics"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
@@ -30,6 +32,9 @@ const (
 	purgeInterval    = time.Hour
 	purgeAfter       = 7 * 24 * time.Hour
 	countInterval    = 10 * time.Second
+	// relayStallTimeout é o tempo sem nenhum ciclo concluído que torna o /healthz
+	// "não saudável" (detecta stall do loop principal do relay).
+	relayStallTimeout = 30 * time.Second
 )
 
 // main roda o relé da outbox: lê eventos não publicados da tabela outbox, publica no
@@ -60,7 +65,15 @@ func main() {
 	}
 	defer pool.Close()
 
-	metrics.Serve(":9106")
+	// lastActivity registra a conclusão de cada ciclo do loop principal; o /healthz
+	// do relay retorna 503 se o loop ficar sem atividade por mais de relayStallTimeout.
+	var lastActivity atomic.Int64
+
+	metrics.ServeWithChecks(":9106",
+		health.Postgres(pool),
+		health.Kafka(brokers),
+		health.LastActivity(&lastActivity, relayStallTimeout),
+	)
 
 	batchSize := envInt("OUTBOX_BATCH_SIZE", defaultBatchSize)
 	if batchSize < 1 {
@@ -115,6 +128,7 @@ func main() {
 	log.Printf("outbox-relay: iniciado batch_size=%d poll_backoff=%s", batchSize, pollBackoff)
 	for {
 		n, err := relayOnce(ctx, outbox, producer, batchSize)
+		lastActivity.Store(time.Now().UnixNano())
 		if err != nil {
 			log.Printf("outbox-relay: erro no ciclo: %v", err)
 			if !sleepCtx(ctx, pollBackoff) {

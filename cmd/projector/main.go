@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"workers-kafka/internal/application/projector"
+	"workers-kafka/internal/infrastructure/health"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
 	"workers-kafka/internal/infrastructure/metrics"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
@@ -49,13 +50,13 @@ func main() {
 	}
 	defer func() { _ = shutdown(ctx) }()
 
-	metrics.Serve(":9105")
-
 	pool, err := infrapostgres.Connect(ctx, infrapostgresread.DatabaseURLFromEnv())
 	if err != nil {
 		log.Fatalf("projector: %v", err)
 	}
 	defer pool.Close()
+
+	metrics.ServeWithChecks(":9105", health.Postgres(pool), health.Kafka(brokers))
 
 	views := infrapostgresread.NewOrderViewRepository(pool)
 	proj := projector.New(views)

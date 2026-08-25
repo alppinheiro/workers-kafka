@@ -6,6 +6,7 @@ require (
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/segmentio/kafka-go v0.4.51
+	github.com/sony/gobreaker v1.0.0
 	github.com/testcontainers/testcontainers-go/modules/kafka v0.34.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.34.0
 	go.opentelemetry.io/otel v1.45.0
