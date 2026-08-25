@@ -215,3 +215,19 @@ docker-compose up -d --no-deps --scale orchestrator=3 --scale worker-payment=3 -
 # Autoscaler (roda no host)
 make autoscale   # configurações via AUTOSCALE_* env
 ```
+
+## Teste de carga sustentada (stress, 120k pedidos)
+
+Para carga máxima com monitoramento contínuo, use `scripts/stress.sh` e o runbook
+`docs/STRESS_TEST.md` (matriz de diagnóstico: sintoma → causa → como resolver).
+
+**Resultado de referência** (120.000 pedidos, Kafka 1 broker local):
+
+- Ingestão: **~496 ev/s** (teto do produtor local de 1 broker).
+- Processamento: pico de **~2.350 ev/s** (o pipeline processa mais rápido do que ingere).
+- **Gargalo sob carga**: `outbox-relay` a ~500 ev/s (outbox acumulou ~117k pendentes);
+  com **2 réplicas** a drenagem acelera ~2× (zero duplicação via `SKIP LOCKED`).
+- `FAILED` ~7% = recusa real de negócio (taxa de pagamento 0.85), não bug.
+- Para 2.000 ev/s sustentados de entrada: **≥4 réplicas de relay** (ou `OUTBOX_BATCH_SIZE`
+  maior) + Kafka com mais brokers/partições (EKS).
+

@@ -768,6 +768,21 @@ KAFKA_BROKERS=localhost:9094 go run ./cmd/load-generator -count 2000 -batch 500 
 > Os resultados acima são o **baseline da Fase 4**. A **Fase 5** implementou concorrência e
 > escala (partições, `SAGA_WORKERS`, multi-instância, autoscaler) — ver `BENCHMARK.md`.
 
+### Teste de carga sustentada (stress)
+
+Para ver o comportamento sob carga máxima com monitoramento contínuo (lag, outbox, sagas,
+throughput), use o script versionado + o runbook de diagnóstico:
+
+```bash
+make up
+scripts/stress.sh 120000     # 120k pedidos + amostragem a cada ~15s
+```
+
+Resultados de referência (120k pedidos) e a **matriz sintoma → causa → como resolver**
+estão em [`docs/STRESS_TEST.md`](docs/STRESS_TEST.md). Descoberta-chave: a **fila real é a
+outbox** (o `outbox-relay` a ~500 ev/s é o gargalo de ingestão no Kafka) — escala-se com
+`docker-compose scale outbox-relay=N` (o `SKIP LOCKED` garante zero duplicação).
+
 ### O que foi corrigido
 
 - **`outbox-relay` passou a publicar em lote** (`PublishBatch`): o throughput do relay deixou de ser o gargalo (foi de ~1 para centenas de eventos/s).
