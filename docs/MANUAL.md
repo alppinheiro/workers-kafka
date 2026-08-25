@@ -375,6 +375,7 @@ de ambiente (12-factor):
 | `OUTBOX_BATCH_SIZE` | `2000` | lote do outbox-relay (maior = menos round-trips) |
 | `OTEL_TRACES_SAMPLER` (+ `ARG`) | `parentbased_always_on` | amostragem de traces (produção: `parentbased_traceidratio` + `ARG=0.1`) |
 | `GATEWAY_CB_ENABLED` / `_MAX_FAILURES` / `_TIMEOUT` | `true` / `5` / `10s` | circuit breaker dos gateways (fail-fast em falhas consecutivas) |
+| `DATABASE_POOL_MAX_CONNS` / `_MIN_CONNS` / `_MAX_LIFETIME` / `_IDLE_TIMEOUT` | `10` / `2` / `1h` / `30s` | pool Postgres configurado (o default `max(4, NumCPU)` subdimensiona sob carga) |
 
 ### 9.2 Portas expostas (compose)
 

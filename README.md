@@ -105,6 +105,7 @@ O `.env.example` documenta todas as variáveis; o `.env` real é ignorado pelo g
 | `KAFKA_AUTO_CREATE_TOPICS_ENABLE` | `true` | Criar tópicos automaticamente (em produção: `false`) |
 | `OTEL_TRACES_SAMPLER` (+ `OTEL_TRACES_SAMPLER_ARG`) | `parentbased_always_on` | Amostragem de traces (produção: `parentbased_traceidratio` + `ARG=0.1`) |
 | `GATEWAY_CB_ENABLED` / `GATEWAY_CB_MAX_FAILURES` / `GATEWAY_CB_TIMEOUT` | `true` / `5` / `10s` | Circuit breaker dos gateways (abre após N falhas; half-open testa 1 request após o timeout) |
+| `DATABASE_POOL_MAX_CONNS` / `_MIN_CONNS` / `_MAX_LIFETIME` / `_IDLE_TIMEOUT` | `10` / `2` / `1h` / `30s` | Pool de conexões Postgres (evita o default subdimensionado `max(4, NumCPU)`) |
 
 Para validar o projeto localmente:
 

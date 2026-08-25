@@ -16,13 +16,14 @@ const (
 
 // Connect cria um pool de conexões com o banco de escrita e aguarda até que o banco
 // responda, retentando enquanto o contexto permitir (útil em debug local quando o
-// Postgres ainda está subindo).
+// Postgres ainda está subindo). O pool é configurado explicitamente via env
+// (DATABASE_POOL_MAX_CONNS/MIN_CONNS/MAX_LIFETIME/IDLE_TIMEOUT) — ver env.go.
 func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	var pool *pgxpool.Pool
 	var err error
 
 	for attempt := 1; attempt <= connectRetries; attempt++ {
-		pool, err = pgxpool.New(ctx, databaseURL)
+		pool, err = newPool(ctx, databaseURL)
 		if err == nil {
 			var pingErr error
 			if pingErr = pool.Ping(ctx); pingErr == nil {
@@ -41,4 +42,18 @@ func Connect(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	}
 
 	return nil, fmt.Errorf("não foi possível conectar ao postgres: %w", err)
+}
+
+// newPool cria o pool com configuração explícita (tamanho e lifetime via env). O default
+// do pgxpool (MaxConns = max(4, NumCPU)) subdimensiona o pipeline sob carga.
+func newPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+	cfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("configuração do pool inválida: %w", err)
+	}
+	cfg.MaxConns = PoolMaxConnsFromEnv()
+	cfg.MinConns = PoolMinConnsFromEnv()
+	cfg.MaxConnLifetime = PoolMaxLifetimeFromEnv()
+	cfg.MaxConnIdleTime = PoolIdleTimeoutFromEnv()
+	return pgxpool.NewWithConfig(ctx, cfg)
 }

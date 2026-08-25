@@ -194,8 +194,8 @@ gerenciados (ou self-hosted p/ reduzir custo) e observabilidade no cluster. Estr
   loop principal stallar (hoje o relay não expõe probe).
 - [ ] **10.7.6** Alertmanager com webhook — roteamento de `SagaDLQGrowth`/`SagaConsumerStalled`
   para Slack/PagerDuty/email no kube-prometheus-stack (alert sem destinatário é silencioso).
-- [ ] **10.7.7** VACUUM/autovacuum na outbox — `VACUUM ANALYZE outbox` após a purge (ou autovacuum
-  agressivo na tabela) para evitar bloat do `idx_outbox_pending`.
+- [x] **10.7.7** VACUUM/autovacuum na outbox — autovacuum agressivo (`000006` tuning) para evitar
+  bloat do `idx_outbox_pending`; + índices `sagas(current_status)` e `outbox(published_at)`.
 - [x] **10.7.8** Circuit breaker nos gateways — `sony/gobreaker` na camada `infrastructure/external`
   (evita thread starvation quando um gateway degrada lentamente).
 - [x] **10.7.9** Validação ativa de `schema_version` — consumer rejeita versões desconhecidas → DLQ
@@ -203,11 +203,9 @@ gerenciados (ou self-hosted p/ reduzir custo) e observabilidade no cluster. Estr
 - [x] **10.7.10** Logging estruturado com `log/slog` — saída JSON nativa (Loki/Datadog sem parser
   customizado; hoje é `log.Printf` quase-structured).
 
-> Itens **10.7.1–10.7.5 e 10.7.8–10.7.10** aplicados junto com o relatório
-> `TECHNICAL_REVIEW.md` (10.7.4/10.7.5: probes reais + healthz do relay; 10.7.8: circuit
-> breaker com `GATEWAY_CB_*`; 10.7.9: schema_version → DLQ; 10.7.10: logs JSON com slog).
-> Restam **10.7.6 (Alertmanager) e 10.7.7 (VACUUM/autovacuum)** — pré-requisitos de
-> operação no EKS (dependem do cluster).
+> Itens **10.7.1–10.7.10** aplicados (10.7.1–10.7.5/8–10 na Fase 10 hardening;
+> 10.7.7 índices + autovacuum na migration `000006`). Resta apenas **10.7.6 (Alertmanager
+> com webhook)** — depende do cluster (kube-prometheus-stack no kind/EKS).
 
 ---
 
