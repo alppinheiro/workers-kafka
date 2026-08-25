@@ -212,7 +212,11 @@ services:
       args:
         TARGET: cmd/outbox-relay
     restart: unless-stopped
-    environment: *write-db-env
+    environment:
+      <<: *write-db-env
+      # Lote do relay (melhoria de prontidão pós-stress: com lote maior, menos
+      # round-trips claim→publish→mark; com N réplicas o SKIP LOCKED paraleliza).
+      OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-2000}
     depends_on:
       kafka-init:
         condition: service_completed_successfully

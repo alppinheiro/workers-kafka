@@ -372,7 +372,7 @@ de ambiente (12-factor):
 | `KAFKA_COMMIT_BATCH` | `50` | mensagens antes do commit de offsets em lote |
 | `KAFKA_COMMIT_INTERVAL` | `200ms` | intervalo máximo entre commits |
 | `KAFKA_ACKS` | `all` | durabilidade do producer (`all` = leader+ISR; `one` = só leader, throughput) |
-| `OUTBOX_BATCH_SIZE` | `500` | lote do outbox-relay |
+| `OUTBOX_BATCH_SIZE` | `2000` | lote do outbox-relay (maior = menos round-trips) |
 | `OTEL_TRACES_SAMPLER` (+ `ARG`) | `parentbased_always_on` | amostragem de traces (produção: `parentbased_traceidratio` + `ARG=0.1`) |
 | `GATEWAY_CB_ENABLED` / `_MAX_FAILURES` / `_TIMEOUT` | `true` / `5` / `10s` | circuit breaker dos gateways (fail-fast em falhas consecutivas) |
 

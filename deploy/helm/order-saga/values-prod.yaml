@@ -11,6 +11,17 @@ image:
 
 replicaCount: 1
 
+# Fase 10/EKS: relay com réplicas dedicadas (gargalo de ingestão) + lote maior.
+relayReplicas: 2
+outboxBatchSize: 2000
+kafkaAcks: "all"
+otelTracesSampler: "parentbased_traceidratio"
+otelTracesSamplerArg: "0.1"
+gatewayCircuitBreaker:
+  enabled: true
+  maxFailures: 5
+  timeout: "10s"
+
 resources:
   requests:
     cpu: "50m"

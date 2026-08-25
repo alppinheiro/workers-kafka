@@ -7,3 +7,12 @@ data:
   KAFKA_BROKERS: {{ .Values.kafka.brokers | quote }}
   OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.otel.endpoint | quote }}
   SAGA_WORKERS: {{ .Values.sagaWorkers | quote }}
+  OUTBOX_BATCH_SIZE: {{ .Values.outboxBatchSize | default 500 | quote }}
+  KAFKA_ACKS: {{ .Values.kafkaAcks | default "all" | quote }}
+  OTEL_TRACES_SAMPLER: {{ .Values.otelTracesSampler | default "parentbased_always_on" | quote }}
+  {{- if .Values.otelTracesSamplerArg }}
+  OTEL_TRACES_SAMPLER_ARG: {{ .Values.otelTracesSamplerArg | quote }}
+  {{- end }}
+  GATEWAY_CB_ENABLED: {{ .Values.gatewayCircuitBreaker.enabled | default true | quote }}
+  GATEWAY_CB_MAX_FAILURES: {{ .Values.gatewayCircuitBreaker.maxFailures | default 5 | quote }}
+  GATEWAY_CB_TIMEOUT: {{ .Values.gatewayCircuitBreaker.timeout | default "10s" | quote }}

@@ -11,6 +11,26 @@ image:
 
 replicaCount: 1
 
+# Replicas dedicadas do outbox-relay (o gargalo de ingestão do Kafka no stress de 120k:
+# ~500 ev/s com 1 réplica; com N réplicas o SKIP LOCKED drena em paralelo sem duplicação).
+relayReplicas: 2
+
+# Tamanho do lote do outbox-relay (claim→publish→mark por ciclo). Default do código: 500.
+outboxBatchSize: 2000
+
+# Durabilidade do producer (all = leader + ISR; one = só leader, maior throughput).
+kafkaAcks: "all"
+
+# Amostragem de traces (spec OTel). Em produção: parentbased_traceidratio + ARG=0.1.
+otelTracesSampler: "parentbased_always_on"
+# otelTracesSamplerArg: "0.1"
+
+# Circuit breaker dos gateways (fail-fast quando um gateway degrada).
+gatewayCircuitBreaker:
+  enabled: true
+  maxFailures: 5
+  timeout: "10s"
+
 resources:
   requests:
     cpu: "50m"

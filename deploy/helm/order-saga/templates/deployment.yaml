@@ -8,7 +8,9 @@ metadata:
   labels:
     {{- include "order-saga.labels" . | nindent 4 }}
 spec:
-  replicas: {{ default $.Values.replicaCount .replicas }}
+  # outbox-relay usa relayReplicas (escala dedicada — é o gargalo de ingestão do Kafka);
+  # demais serviços usam replicaCount ou replicas por serviço.
+  replicas: {{ if and (eq .name "outbox-relay") $.Values.relayReplicas }}{{ $.Values.relayReplicas }}{{ else }}{{ default $.Values.replicaCount .replicas }}{{ end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ .name }}

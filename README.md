@@ -101,7 +101,7 @@ O `.env.example` documenta todas as variáveis; o `.env` real é ignorado pelo g
 | `KAFKA_COMMIT_BATCH` | `50` | Mensagens acumuladas antes do commit de offsets em lote |
 | `KAFKA_COMMIT_INTERVAL` | `200ms` | Intervalo máximo entre commits em lote |
 | `KAFKA_ACKS` | `all` | Durabilidade do producer (`all` = leader + ISR; `one` = só leader, maior throughput) |
-| `OUTBOX_BATCH_SIZE` | `500` | Tamanho do lote do outbox-relay |
+| `OUTBOX_BATCH_SIZE` | `2000` | Tamanho do lote do outbox-relay |
 | `KAFKA_AUTO_CREATE_TOPICS_ENABLE` | `true` | Criar tópicos automaticamente (em produção: `false`) |
 | `OTEL_TRACES_SAMPLER` (+ `OTEL_TRACES_SAMPLER_ARG`) | `parentbased_always_on` | Amostragem de traces (produção: `parentbased_traceidratio` + `ARG=0.1`) |
 | `GATEWAY_CB_ENABLED` / `GATEWAY_CB_MAX_FAILURES` / `GATEWAY_CB_TIMEOUT` | `true` / `5` / `10s` | Circuit breaker dos gateways (abre após N falhas; half-open testa 1 request após o timeout) |
