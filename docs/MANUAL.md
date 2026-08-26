@@ -259,6 +259,10 @@ estoque falhar após a aprovação).
 
 ### 6.2 Máquina de estados (status em `internal/domain/status.go`)
 
+As transições válidas são **explícitas em `internal/application/orchestrator/state_machine.go`
+(`validTransitions`)**, validada por `canTransitionTo`/`assertTransition` em cada avanço —
+um novo estado/transição aparece obrigatoriamente na tabela (review 3.2).
+
 | Status | Significado | Como entra |
 |---|---|---|
 | `PENDING` | pedido criado, saga iniciada | `StartOrder` |
@@ -271,6 +275,18 @@ estoque falhar após a aprovação).
 | `COMPLETED` | saga concluída (terminal) | `ORDER_COMPLETED` publicado |
 | `FAILED` | saga falhou (terminal) | `ORDER_FAILED` publicado |
 | `RETRYING` | erro transitório → nova tentativa | resultado `RETRYING` |
+
+Fluxo de transições (tabela `validTransitions`):
+
+```
+PENDING → PAYMENT_PENDING
+PAYMENT_PENDING → PAYMENT_APPROVED | FAILED
+PAYMENT_APPROVED → INVENTORY_RESERVED | PAYMENT_REFUND_PENDING | FAILED
+PAYMENT_REFUND_PENDING → FAILED
+INVENTORY_RESERVED → NOTIFIED | COMPLETED* | FAILED
+NOTIFIED → COMPLETED
+(* COMPLETED: falha de notificação ignorada — special-case)
+```
 
 ### 6.3 Caminhos de erro
 

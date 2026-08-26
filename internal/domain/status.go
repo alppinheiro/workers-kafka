@@ -1,5 +1,7 @@
 package domain
 
+import "errors"
+
 // OrderStatus representa a etapa atual do ciclo de vida do pedido na saga.
 type OrderStatus string
 
@@ -15,3 +17,7 @@ const (
 	StatusRetrying             OrderStatus = "RETRYING"
 	StatusFailed               OrderStatus = "FAILED"
 )
+
+// ErrInvalidTransition é retornado quando a saga tenta uma transição de status não
+// prevista na máquina de estados (ver orchestrator.validTransitions).
+var ErrInvalidTransition = errors.New("transição de estado inválida")

@@ -154,6 +154,9 @@ func (o *Orchestrator) handleResult(ctx context.Context, tx application.SagaTx, 
 		slog.InfoContext(ctx, "avanço de etapa", "component", "orchestrator", "phase", "decision", "action", "advance",
 			"order_id", event.OrderID, "saga_id", event.SagaID, "event_id", event.EventID, "type", event.EventType,
 			"from", saga.Current, "to", event.StatusAtual, "retry_count", saga.RetryCount)
+		if err := assertTransition(saga.Current, event.StatusAtual); err != nil {
+			return err
+		}
 		saga.Previous = saga.Current
 		saga.Current = event.StatusAtual
 		saga.RetryCount = 0
@@ -212,6 +215,9 @@ func (o *Orchestrator) retry(ctx context.Context, tx application.SagaTx, saga *d
 // startCompensation inicia o estorno do pagamento quando uma etapa posterior falha após
 // a aprovação, salvando o novo estado antes de publicar o comando de compensação.
 func (o *Orchestrator) startCompensation(ctx context.Context, tx application.SagaTx, saga *domain.Saga) error {
+	if err := assertTransition(saga.Current, domain.StatusPaymentRefundPending); err != nil {
+		return err
+	}
 	saga.Previous = saga.Current
 	saga.Current = domain.StatusPaymentRefundPending
 	saga.RetryCount = 0
@@ -225,6 +231,9 @@ func (o *Orchestrator) startCompensation(ctx context.Context, tx application.Sag
 
 // fail encerra a saga com FAILED e publica um evento terminal para rastreabilidade externa.
 func (o *Orchestrator) fail(ctx context.Context, tx application.SagaTx, saga *domain.Saga, metadata map[string]string) error {
+	if err := assertTransition(saga.Current, domain.StatusFailed); err != nil {
+		return err
+	}
 	previousStatus := saga.Current
 	saga.Previous = previousStatus
 	saga.Current = domain.StatusFailed
@@ -245,6 +254,9 @@ func (o *Orchestrator) fail(ctx context.Context, tx application.SagaTx, saga *do
 // complete encerra a saga em COMPLETED após receber a confirmação NOTIFIED do worker final.
 // O metadata opcional pode conter informações sobre falhas não-fatais (ex.: notificações).
 func (o *Orchestrator) complete(ctx context.Context, tx application.SagaTx, saga *domain.Saga, metadata map[string]string) error {
+	if err := assertTransition(saga.Current, domain.StatusNotified); err != nil {
+		return err
+	}
 	saga.Previous = saga.Current
 	saga.Current = domain.StatusNotified
 	saga.RetryCount = 0
