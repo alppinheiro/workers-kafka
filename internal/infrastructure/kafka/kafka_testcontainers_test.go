@@ -58,8 +58,8 @@ func TestKafkaProducerConsumerRoundTrip(t *testing.T) {
 		EventID:       "evt-roundtrip-1",
 		OrderID:       "order-roundtrip",
 		SagaID:        "order-roundtrip",
-		StatusAtual:   domain.StatusPaymentPending,
-		EventType:     domain.EventPaymentCommand,
+		StatusAtual:   domain.StatusPaymentApproved,
+		EventType:     domain.EventPaymentResult,
 		SchemaVersion: domain.CurrentSchemaVersion,
 		CreatedAt:     time.Now().UTC(),
 	}
