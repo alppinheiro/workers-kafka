@@ -231,3 +231,17 @@ Para carga máxima com monitoramento contínuo, use `scripts/stress.sh` e o runb
 - Para 2.000 ev/s sustentados de entrada: **≥4 réplicas de relay** (ou `OUTBOX_BATCH_SIZE`
   maior) + Kafka com mais brokers/partições (EKS).
 
+### A/B pós-otimização (migration `000006` + pool + `OUTBOX_BATCH_SIZE=2000`)
+
+Mesmo teste repetido após as melhorias — **detalhes em `docs/STRESS_TEST.md §5`**:
+
+| Métrica | ANTES | DEPOIS | Δ |
+|---|---|---|---|
+| Processamento (pico) | ~2.350 ev/s | ~3.780 ev/s | **+60%** |
+| Outbox pendente (durante) | ~70k–117k | ~2k–3k | **-97%** |
+| Outbox no fim do teste | ~114k | ~51 | drenou |
+| Gargalo | outbox-relay | **Kafka broker single** (timeout) | mudou |
+
+> Conclusão: as otimizações funcionaram — o novo limite local é o **broker Kafka**
+> (1 container); no EKS (MSK/Strimzi multi-broker) o producer deixa de ser o gargalo.
+

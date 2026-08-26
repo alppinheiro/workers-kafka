@@ -116,3 +116,28 @@ O `scripts/stress.sh`:
 2. O design de resiliência funciona: nada se perde (mensagens retidas no Kafka/outbox),
    as sagas convergem, e o escalonamento do relay é seguro (SKIP LOCKED).
 
+
+## 5. Comparativo pós-otimização (A/B — 120k, depois das melhorias)
+
+> Após as otimizações (migration `000006` índices+autovacuum, pool `DATABASE_POOL_*`,
+> `OUTBOX_BATCH_SIZE=2000`), o mesmo teste de 120k foi repetido. **O load-generator
+> falhou com timeout de I/O no Kafka broker (~75k publicados)** — descoberta que
+> provou que as otimizações **moveram o gargalo do relay para o Kafka single-broker**.
+
+| Métrica (mesma janela de tempo) | ANTES | DEPOIS | Δ |
+|---|---|---|---|
+| Processamento (pico) | ~2.350 ev/s | **~3.780 ev/s** | **+60%** |
+| Outbox pendente durante a publicação | ~70k–117k | **~2k–3k** | **-97%** |
+| Outbox no fim do teste | ~114k pendentes | **~51** | drenou |
+| Gargalo identificado | `outbox-relay` (~500 ev/s) | **Kafka broker single** (timeout no producer) | mudou! |
+
+### Leitura
+1. As otimizações **funcionaram**: o relay com `batch=2000` drenou a outbox quase em
+   tempo real e o pipeline processou ~60% mais eventos/s (pool + índices + autovacuum).
+2. O **novo gargalo é o broker Kafka** (1 container no Colima, CPU limitada): a ingestão
+   (~496 ev/s) + consumo acelerado (~3.700 ev/s) + commits saturaram o broker, e o
+   produtor estourou o timeout (`i/o timeout` no `WriteMessages`).
+3. **Para a Fase 10**: com Kafka multi-broker (MSK/Strimzi) o producer deixa de ser o
+   limite; no local, o teto prático de ingestão caiu para ~75k pedidos por rodada com a
+   configuração otimizada (ou use `KAFKA_ACKS=one` no load-generator para aliviar o broker).
+
