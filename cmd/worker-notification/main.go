@@ -19,7 +19,7 @@ import (
 	"workers-kafka/internal/interfaces"
 )
 
-// main sobe o worker de notificação, consumindo comandos do tópico orders.notification e publicando o resultado.
+// main sobe o worker de notificação, consumindo comandos do tópico orders.notification.cmd e publicando o resultado.
 func main() {
 	logging.Setup("worker-notification")
 	brokers := infrakafka.BrokersFromEnv()
@@ -32,7 +32,7 @@ func main() {
 		GroupID:     "worker-notification",
 		ServiceName: "worker-notification",
 		Workers:     infrakafka.WorkersFromEnv(),
-		Topic:       infrakafka.TopicOrderNotification,
+		Topic:       infrakafka.TopicNotificationCommand,
 		DLQWriter:   dlq,
 	})
 	defer func() { _ = consumer.Close() }()

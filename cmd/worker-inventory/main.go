@@ -19,7 +19,7 @@ import (
 	"workers-kafka/internal/interfaces"
 )
 
-// main sobe o worker de estoque, consumindo comandos do tópico orders.inventory e publicando o resultado.
+// main sobe o worker de estoque, consumindo comandos do tópico orders.inventory.cmd e publicando o resultado.
 func main() {
 	logging.Setup("worker-inventory")
 	brokers := infrakafka.BrokersFromEnv()
@@ -32,7 +32,7 @@ func main() {
 		GroupID:     "worker-inventory",
 		ServiceName: "worker-inventory",
 		Workers:     infrakafka.WorkersFromEnv(),
-		Topic:       infrakafka.TopicOrderInventory,
+		Topic:       infrakafka.TopicInventoryCommand,
 		DLQWriter:   dlq,
 	})
 	defer func() { _ = consumer.Close() }()

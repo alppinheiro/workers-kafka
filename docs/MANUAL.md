@@ -246,12 +246,12 @@ estoque falhar após a aprovação).
 ```
 1. create-order publica ORDER_CREATED        → tópico orders.created
 2. orchestrator (StartOrder) salva PENDING,  → journal IN + outbox PAYMENT_COMMAND
-   publica PAYMENT_COMMAND                   → tópico orders.payment
-3. worker-payment (Process): aprovado?       → PAYMENT_RESULT (APPROVED/FAILED/RETRYING)
-4. orchestrator (PAYMENT_APPROVED) salva,    → outbox INVENTORY_COMMAND → orders.inventory
-5. worker-inventory (Reserve)                → INVENTORY_RESULT
-6. orchestrator (INVENTORY_RESERVED)         → outbox NOTIFICATION_COMMAND → orders.notification
-7. worker-notification (Notify)              → NOTIFICATION_RESULT
+   publica PAYMENT_COMMAND                   → tópico orders.payment.cmd
+3. worker-payment (Process): aprovado?       → PAYMENT_RESULT → orders.payment.result
+4. orchestrator (PAYMENT_APPROVED) salva,    → outbox INVENTORY_COMMAND → orders.inventory.cmd
+5. worker-inventory (Reserve)                → INVENTORY_RESULT → orders.inventory.result
+6. orchestrator (INVENTORY_RESERVED)         → outbox NOTIFICATION_COMMAND → orders.notification.cmd
+7. worker-notification (Notify)              → NOTIFICATION_RESULT → orders.notification.result
 8. orchestrator (NOTIFIED) → COMPLETED       → ORDER_COMPLETED → orders.status
 9. projector atualiza order_views            → read model (CQRS)
 10. order-status consome ORDER_COMPLETED     → auditoria externa
@@ -394,9 +394,16 @@ de ambiente (12-factor):
 ### 9.3 Tópicos Kafka (4 partições; DLQ com 1)
 
 ```
-orders.created · orders.payment · orders.inventory · orders.notification · orders.status
-orders.created.dlq · orders.payment.dlq · orders.inventory.dlq · orders.notification.dlq · orders.status.dlq
+orders.created · orders.status
+orders.payment.cmd · orders.payment.result
+orders.inventory.cmd · orders.inventory.result
+orders.notification.cmd · orders.notification.result
+(cada tópico tem sua DLQ: <topic>.dlq)
 ```
+
+> Tópicos **segregados por direção** (`.cmd` = comandos para os workers; `.result` =
+> resultados para o orquestrador) — redução da amplificação de mensagens e contratos
+> independentes (review 2.6/3.1).
 
 ---
 
@@ -450,7 +457,7 @@ docker-compose exec kafka /bin/sh -c \
 # Ver mensagens da DLQ
 docker-compose exec kafka /bin/sh -c \
   '/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
-   --topic orders.payment.dlq --from-beginning --max-messages 5'
+   --topic orders.payment.result.dlq --from-beginning --max-messages 5'
 
 # Listar tópicos / partições
 docker-compose exec kafka /bin/sh -c \
@@ -633,14 +640,14 @@ status inesperado; comando inválido.
 # Ver as mensagens da DLQ
 docker-compose exec kafka /bin/sh -c \
   '/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
-   --topic orders.payment.dlq --from-beginning --max-messages 5'
+   --topic orders.payment.result.dlq --from-beginning --max-messages 5'
 
 # Reprocessar de volta para o tópico original
 docker-compose exec kafka /bin/sh -c \
   '/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 \
-   --topic orders.payment.dlq --from-beginning | \
+   --topic orders.payment.result.dlq --from-beginning | \
    /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 \
-   --topic orders.payment'
+   --topic orders.payment.result'
 ```
 
 > Se a causa for um **bug** (ex.: contrato de mensagem), corrija o código e faça deploy —

@@ -19,14 +19,14 @@ func TestTopicForEventType(t *testing.T) {
 		{domain.EventOrderCreated, TopicOrderCreated},
 		{domain.EventOrderCompleted, TopicOrderStatus},
 		{domain.EventOrderFailed, TopicOrderStatus},
-		{domain.EventPaymentCommand, TopicOrderPayment},
-		{domain.EventPaymentCompensate, TopicOrderPayment},
-		{domain.EventPaymentResult, TopicOrderPayment},
-		{domain.EventPaymentCompensateResult, TopicOrderPayment},
-		{domain.EventInventoryCommand, TopicOrderInventory},
-		{domain.EventInventoryResult, TopicOrderInventory},
-		{domain.EventNotificationCommand, TopicOrderNotification},
-		{domain.EventNotificationResult, TopicOrderNotification},
+		{domain.EventPaymentCommand, TopicPaymentCommand},
+		{domain.EventPaymentCompensate, TopicPaymentCommand},
+		{domain.EventPaymentResult, TopicPaymentResult},
+		{domain.EventPaymentCompensateResult, TopicPaymentResult},
+		{domain.EventInventoryCommand, TopicInventoryCommand},
+		{domain.EventInventoryResult, TopicInventoryResult},
+		{domain.EventNotificationCommand, TopicNotificationCommand},
+		{domain.EventNotificationResult, TopicNotificationResult},
 	}
 
 	for _, tc := range cases {
@@ -59,11 +59,11 @@ func TestBrokersFromEnv_Multiple(t *testing.T) {
 
 func TestDLQTopicFor(t *testing.T) {
 	cases := map[string]string{
-		TopicOrderCreated:      TopicOrderCreated + ".dlq",
-		TopicOrderPayment:      TopicOrderPayment + ".dlq",
-		TopicOrderInventory:    TopicOrderInventory + ".dlq",
-		TopicOrderNotification: TopicOrderNotification + ".dlq",
-		TopicOrderStatus:       TopicOrderStatus + ".dlq",
+		TopicOrderCreated:       TopicOrderCreated + ".dlq",
+		TopicPaymentResult:      TopicPaymentResult + ".dlq",
+		TopicInventoryResult:    TopicInventoryResult + ".dlq",
+		TopicNotificationResult: TopicNotificationResult + ".dlq",
+		TopicOrderStatus:        TopicOrderStatus + ".dlq",
 	}
 	for topic, want := range cases {
 		if got := DLQTopicFor(topic); got != want {

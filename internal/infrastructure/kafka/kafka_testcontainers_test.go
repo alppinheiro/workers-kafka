@@ -31,7 +31,7 @@ func TestKafkaProducerConsumerRoundTrip(t *testing.T) {
 		t.Fatalf("falha ao obter brokers: %v", err)
 	}
 	t.Logf("brokers retornados: %v", brokers)
-	createTopicViaExec(t, container, infrakafka.TopicOrderPayment)
+	createTopicViaExec(t, container, infrakafka.TopicPaymentResult)
 
 	producer := infrakafka.NewProducer(brokers, "test-producer")
 	defer func() { _ = producer.Close() }()
@@ -41,7 +41,7 @@ func TestKafkaProducerConsumerRoundTrip(t *testing.T) {
 		Brokers:     brokers,
 		GroupID:     "test-roundtrip",
 		ServiceName: "test-consumer",
-		Topic:       infrakafka.TopicOrderPayment,
+		Topic:       infrakafka.TopicPaymentResult,
 	})
 	defer func() { _ = consumer.Close() }()
 

@@ -26,7 +26,7 @@ const refreshInterval = 10 * time.Second
 
 var (
 	consumerGroups = []string{"orchestrator", "worker-payment", "worker-inventory", "worker-notification", "projector", "order-status"}
-	flowTopics     = []string{"orders.created", "orders.payment", "orders.inventory", "orders.notification", "orders.status"}
+	flowTopics     = infrakafka.FlowTopics()
 	flowPartitions = []int{0, 1, 2, 3}
 )
 

@@ -18,7 +18,7 @@ import (
 	"workers-kafka/internal/interfaces"
 )
 
-// main sobe o projector: consome os cinco tópicos do barramento e mantém o read model
+// main sobe o projector: consome todos os tópicos do barramento e mantém o read model
 // (order_views) no banco de leitura, com dedup por event_id.
 func main() {
 	logging.Setup("projector")
@@ -32,14 +32,8 @@ func main() {
 		GroupID:     "projector",
 		ServiceName: "projector",
 		Workers:     infrakafka.WorkersFromEnv(),
-		Topics: []string{
-			infrakafka.TopicOrderCreated,
-			infrakafka.TopicOrderPayment,
-			infrakafka.TopicOrderInventory,
-			infrakafka.TopicOrderNotification,
-			infrakafka.TopicOrderStatus,
-		},
-		DLQWriter: dlq,
+		Topics:      infrakafka.FlowTopics(),
+		DLQWriter:   dlq,
 	})
 	defer func() { _ = consumer.Close() }()
 

@@ -35,9 +35,9 @@ func main() {
 		Workers:     infrakafka.WorkersFromEnv(),
 		Topics: []string{
 			infrakafka.TopicOrderCreated,
-			infrakafka.TopicOrderPayment,
-			infrakafka.TopicOrderInventory,
-			infrakafka.TopicOrderNotification,
+			infrakafka.TopicPaymentResult,
+			infrakafka.TopicInventoryResult,
+			infrakafka.TopicNotificationResult,
 		},
 		DLQWriter: dlq,
 	})

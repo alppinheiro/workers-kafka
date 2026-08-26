@@ -19,7 +19,7 @@ import (
 	"workers-kafka/internal/interfaces"
 )
 
-// main sobe o worker de pagamento, consumindo comandos do tópico orders.payment e publicando o resultado.
+// main sobe o worker de pagamento, consumindo comandos do tópico orders.payment.cmd e publicando o resultado.
 func main() {
 	logging.Setup("worker-payment")
 	brokers := infrakafka.BrokersFromEnv()
@@ -32,7 +32,7 @@ func main() {
 		GroupID:     "worker-payment",
 		ServiceName: "worker-payment",
 		Workers:     infrakafka.WorkersFromEnv(),
-		Topic:       infrakafka.TopicOrderPayment,
+		Topic:       infrakafka.TopicPaymentCommand,
 		DLQWriter:   dlq,
 	})
 	defer func() { _ = consumer.Close() }()

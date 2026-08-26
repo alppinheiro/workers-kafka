@@ -123,10 +123,10 @@ spec:
           command: ["/bin/sh", "-ec"]
           args:
             - |
-              for t in orders.created orders.payment orders.inventory orders.notification orders.status; do
+              for t in orders.created orders.status orders.payment.cmd orders.payment.result orders.inventory.cmd orders.inventory.result orders.notification.cmd orders.notification.result; do
                 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$t" --partitions 4 --replication-factor 1
               done
-              for t in orders.created.dlq orders.payment.dlq orders.inventory.dlq orders.notification.dlq orders.status.dlq; do
+              for t in orders.created.dlq orders.status.dlq orders.payment.cmd.dlq orders.payment.result.dlq orders.inventory.cmd.dlq orders.inventory.result.dlq orders.notification.cmd.dlq orders.notification.result.dlq; do
                 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$t" --partitions 1 --replication-factor 1
               done
               echo "tópicos criados"

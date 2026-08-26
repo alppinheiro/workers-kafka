@@ -193,18 +193,21 @@ definido, senão o socket do Colima (macOS) se existir, senão o Docker nativo
 flowchart LR
   CO[Create Order] --> OC[orders.created]
   OC --> ORQ[Orchestrator]
-  ORQ --> OP[orders.payment]
-  OP --> PAY[Worker Payment]
-  PAY --> OP
-  ORQ --> OI[orders.inventory]
-  OI --> INV[Worker Inventory]
-  INV --> OI
-  ORQ --> ON[orders.notification]
-  ON --> NOTI[Worker Notification]
-  NOTI --> ON
-  ORQ --> OP_COMP[orders.payment compensate]
+  ORQ --> OP_CMD[orders.payment.cmd]
+  OP_CMD --> PAY[Worker Payment]
+  PAY --> OP_RES[orders.payment.result]
+  OP_RES --> ORQ
+  ORQ --> OI_CMD[orders.inventory.cmd]
+  OI_CMD --> INV[Worker Inventory]
+  INV --> OI_RES[orders.inventory.result]
+  OI_RES --> ORQ
+  ORQ --> ON_CMD[orders.notification.cmd]
+  ON_CMD --> NOTI[Worker Notification]
+  NOTI --> ON_RES[orders.notification.result]
+  ON_RES --> ORQ
+  ORQ --> OP_COMP[orders.payment.cmd · compensate]
   OP_COMP --> PAY_COMP[Worker Payment compensate]
-  PAY_COMP --> OP_COMP
+  PAY_COMP --> OP_RES
   ORQ --> OS[orders.status]
   OS --> AUD[Order Status Consumer]
 
@@ -346,11 +349,18 @@ flowchart TD
 
 ## Tópicos Kafka
 
-- `orders.created`: evento inicial do pedido
-- `orders.payment`: comandos e resultados de pagamento
-- `orders.inventory`: comandos e resultados de estoque
-- `orders.notification`: comandos e resultados de notificação
-- `orders.status`: eventos terminais da saga
+Tópicos **segregados por direção** (comando vs resultado) desde o hardening (review 2.6/3.1):
+cada worker consome apenas comandos (`.cmd`) e o orquestrador apenas resultados (`.result`) —
+sem amplificação de mensagens e com contratos evoluindo de forma independente.
+
+- `orders.created`: evento inicial do pedido (`ORDER_CREATED`)
+- `orders.payment.cmd`: comandos de pagamento (`PAYMENT_COMMAND`, `PAYMENT_COMPENSATE`)
+- `orders.payment.result`: resultados de pagamento (`PAYMENT_RESULT`, `PAYMENT_COMPENSATE_RESULT`)
+- `orders.inventory.cmd`: comandos de estoque (`INVENTORY_COMMAND`)
+- `orders.inventory.result`: resultados de estoque (`INVENTORY_RESULT`)
+- `orders.notification.cmd`: comandos de notificação (`NOTIFICATION_COMMAND`)
+- `orders.notification.result`: resultados de notificação (`NOTIFICATION_RESULT`)
+- `orders.status`: eventos terminais da saga (`ORDER_COMPLETED`, `ORDER_FAILED`)
 
 Todos os eventos usam `order_id` como chave de particionamento para preservar a ordem lógica do pedido.
 
@@ -853,14 +863,14 @@ docker-compose exec kafka /bin/sh -c \
 Mensagens com erro definitivo vão para `orders.<etapa>.dlq`. Para inspecionar e reprocessar:
 
 ```bash
-# Ver as mensagens da DLQ de pagamento
+# Ver as mensagens da DLQ de resultado de pagamento
 docker-compose exec kafka /bin/sh -c \
-  '/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic orders.payment.dlq --from-beginning --max-messages 5'
+  '/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic orders.payment.result.dlq --from-beginning --max-messages 5'
 
 # Reproduzir de volta para o tópico original (reprocessamento)
 docker-compose exec kafka /bin/sh -c \
-  '/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic orders.payment.dlq --from-beginning | \
-   /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic orders.payment'
+  '/opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic orders.payment.result.dlq --from-beginning | \
+   /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic orders.payment.result'
 ```
 
 > A idempotência por `event_id` torna o reprocessamento seguro: eventos já registrados

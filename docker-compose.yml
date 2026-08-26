@@ -125,20 +125,15 @@ services:
       - -ec
       - |
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.created --partitions 4 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.payment --partitions 4 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.inventory --partitions 4 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.notification --partitions 4 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.status --partitions 4 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --alter --topic orders.created --partitions 4 || true
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --alter --topic orders.payment --partitions 4 || true
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --alter --topic orders.inventory --partitions 4 || true
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --alter --topic orders.notification --partitions 4 || true
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --alter --topic orders.status --partitions 4 || true
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.created.dlq --partitions 1 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.payment.dlq --partitions 1 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.inventory.dlq --partitions 1 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.notification.dlq --partitions 1 --replication-factor 1
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic orders.status.dlq --partitions 1 --replication-factor 1
+        for t in orders.status orders.payment.cmd orders.payment.result orders.inventory.cmd orders.inventory.result orders.notification.cmd orders.notification.result; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$$t" --partitions 4 --replication-factor 1
+        done
+        for t in orders.created orders.status orders.payment.cmd orders.payment.result orders.inventory.cmd orders.inventory.result orders.notification.cmd orders.notification.result; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --alter --topic "$$t" --partitions 4 || true
+        done
+        for t in orders.created.dlq orders.status.dlq orders.payment.cmd.dlq orders.payment.result.dlq orders.inventory.cmd.dlq orders.inventory.result.dlq orders.notification.cmd.dlq orders.notification.result.dlq; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$$t" --partitions 1 --replication-factor 1
+        done
     restart: "no"
 
   orchestrator:
