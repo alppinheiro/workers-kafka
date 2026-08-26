@@ -45,22 +45,24 @@ func (r *EventLogRepository) Append(ctx context.Context, entry application.Event
 
 	const query = `
 INSERT INTO saga_events (order_id, saga_id, event_id, event_type, component, direction, status_anterior, status_atual, payload, request_payload, response_payload)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+VALUES (@order_id, @saga_id, @event_id, @event_type, @component, @direction, @status_anterior, @status_atual, @payload, @request_payload, @response_payload)
 ON CONFLICT (event_id, component, direction) DO NOTHING`
 
-	_, err = r.db.Exec(ctx, query,
-		entry.OrderID,
-		entry.SagaID,
-		entry.EventID,
-		string(entry.EventType),
-		entry.Component,
-		entry.Direction,
-		string(entry.StatusAnterior),
-		string(entry.StatusAtual),
-		payloadJSON,
-		requestJSON,
-		responseJSON,
-	)
+	// Named args (review 3.4): com 11 colunas, a ordem posicional ($1..$11) era frágil
+	// para manutenção — o nome deixa a query autodocumentada e a ordem irrelevante.
+	_, err = r.db.Exec(ctx, query, pgx.NamedArgs{
+		"order_id":         entry.OrderID,
+		"saga_id":          entry.SagaID,
+		"event_id":         entry.EventID,
+		"event_type":       string(entry.EventType),
+		"component":        entry.Component,
+		"direction":        entry.Direction,
+		"status_anterior":  string(entry.StatusAnterior),
+		"status_atual":     string(entry.StatusAtual),
+		"payload":          payloadJSON,
+		"request_payload":  requestJSON,
+		"response_payload": responseJSON,
+	})
 	if err != nil {
 		return fmt.Errorf("erro ao gravar evento %s no journal: %w", entry.EventID, err)
 	}

@@ -41,7 +41,7 @@ func NewSagaRepositoryTx(tx pgx.Tx) *SagaRepository {
 func (r *SagaRepository) Save(ctx context.Context, saga domain.Saga) error {
 	const query = `
 INSERT INTO sagas (order_id, saga_id, current_status, previous_status, retry_count, transaction_id, updated_at)
-VALUES ($1, $1, $2, $3, $4, $5, now())
+VALUES (@order_id, @order_id, @current_status, @previous_status, @retry_count, @transaction_id, now())
 ON CONFLICT (order_id) DO UPDATE SET
 	current_status  = EXCLUDED.current_status,
 	previous_status = EXCLUDED.previous_status,
@@ -49,13 +49,13 @@ ON CONFLICT (order_id) DO UPDATE SET
 	transaction_id  = EXCLUDED.transaction_id,
 	updated_at      = now()`
 
-	_, err := r.db.Exec(ctx, query,
-		saga.OrderID,
-		string(saga.Current),
-		string(saga.Previous),
-		saga.RetryCount,
-		saga.TransactionID,
-	)
+	_, err := r.db.Exec(ctx, query, pgx.NamedArgs{
+		"order_id":        saga.OrderID,
+		"current_status":  string(saga.Current),
+		"previous_status": string(saga.Previous),
+		"retry_count":     saga.RetryCount,
+		"transaction_id":  saga.TransactionID,
+	})
 	if err != nil {
 		return fmt.Errorf("erro ao salvar saga %s: %w", saga.OrderID, err)
 	}

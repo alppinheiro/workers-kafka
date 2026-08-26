@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"workers-kafka/internal/domain"
@@ -37,7 +38,7 @@ func (r *OrderViewRepository) ApplyEvent(ctx context.Context, event domain.Event
 	// o read model de COMPLETED/FAILED. Eventos atrasados seguem entrando na timeline.
 	const query = `
 INSERT INTO order_views (order_id, current_status, last_event_type, last_event_at, transaction_id, notification_error, payment_refund_failed, timeline, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, jsonb_build_array($8::jsonb), now())
+VALUES (@order_id, @current_status, @last_event_type, @last_event_at, @transaction_id, @notification_error, @payment_refund_failed, jsonb_build_array(@timeline::jsonb), now())
 ON CONFLICT (order_id) DO UPDATE SET
 	current_status        = CASE WHEN order_views.current_status IN ('COMPLETED', 'FAILED')
 	                             THEN order_views.current_status
@@ -51,19 +52,19 @@ ON CONFLICT (order_id) DO UPDATE SET
 	transaction_id        = CASE WHEN EXCLUDED.transaction_id <> '' THEN EXCLUDED.transaction_id ELSE order_views.transaction_id END,
 	notification_error    = order_views.notification_error OR EXCLUDED.notification_error,
 	payment_refund_failed = order_views.payment_refund_failed OR EXCLUDED.payment_refund_failed,
-	timeline              = order_views.timeline || jsonb_build_array($8::jsonb),
+	timeline              = order_views.timeline || jsonb_build_array(@timeline::jsonb),
 	updated_at            = now()`
 
-	_, err = r.pool.Exec(ctx, query,
-		event.OrderID,
-		string(event.StatusAtual),
-		string(event.EventType),
-		event.CreatedAt,
-		event.TransactionID,
-		notificationError,
-		paymentRefundFailed,
-		payload,
-	)
+	_, err = r.pool.Exec(ctx, query, pgx.NamedArgs{
+		"order_id":              event.OrderID,
+		"current_status":        string(event.StatusAtual),
+		"last_event_type":       string(event.EventType),
+		"last_event_at":         event.CreatedAt,
+		"transaction_id":        event.TransactionID,
+		"notification_error":    notificationError,
+		"payment_refund_failed": paymentRefundFailed,
+		"timeline":              payload,
+	})
 	if err != nil {
 		return fmt.Errorf("erro ao aplicar evento %s no read model: %w", event.EventID, err)
 	}

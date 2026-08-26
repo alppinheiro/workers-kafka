@@ -39,10 +39,16 @@ func NewOutboxRepositoryTx(tx pgx.Tx) *OutboxRepository {
 func (r *OutboxRepository) Append(ctx context.Context, entry OutboxEntry) error {
 	const query = `
 INSERT INTO outbox (event_id, topic, key, payload, traceparent)
-VALUES ($1, $2, $3, $4, $5)
+VALUES (@event_id, @topic, @key, @payload, @traceparent)
 ON CONFLICT (event_id) DO NOTHING`
 
-	_, err := r.db.Exec(ctx, query, entry.EventID, entry.Topic, entry.Key, entry.Payload, entry.Traceparent)
+	_, err := r.db.Exec(ctx, query, pgx.NamedArgs{
+		"event_id":    entry.EventID,
+		"topic":       entry.Topic,
+		"key":         entry.Key,
+		"payload":     entry.Payload,
+		"traceparent": entry.Traceparent,
+	})
 	if err != nil {
 		return fmt.Errorf("erro ao gravar evento %s na outbox: %w", entry.EventID, err)
 	}

@@ -20,6 +20,7 @@ import (
 // medindo a vazão real de ingestão. Uso (após make up):
 //
 //	go run ./cmd/load-generator -count 2000 -batch 500
+//	go run ./cmd/load-generator -count 120000 -rate 2000   # sustentar 2.000 ev/s por 60s
 //
 // Use para observar o backlog/lag e o throughput de processamento das sagas.
 func main() {
@@ -27,6 +28,7 @@ func main() {
 	count := flag.Int("count", 10000, "total de pedidos a publicar")
 	batch := flag.Int("batch", 500, "tamanho do lote por WriteMessages")
 	prefix := flag.String("prefix", "load", "prefixo do order_id")
+	rate := flag.Int("rate", 0, "taxa máxima de publicação (eventos/s); 0 = o mais rápido possível")
 	flag.Parse()
 
 	brokers := infrakafka.BrokersFromEnv()
@@ -71,6 +73,15 @@ func main() {
 		if err := writer.WriteMessages(ctx, msgs...); err != nil {
 			slog.Error("erro ao publicar lote", "error", err)
 			os.Exit(1)
+		}
+
+		// Rate limiting: com -rate > 0, mantém a taxa MÉDIA de publicação (eventos/s)
+		// aguardando o tempo necessário para o total publicado até aqui caber na janela.
+		if *rate > 0 {
+			targetElapsed := time.Duration(published) * time.Second / time.Duration(*rate)
+			if wait := targetElapsed - time.Since(start); wait > 0 {
+				time.Sleep(wait)
+			}
 		}
 	}
 

@@ -11,6 +11,8 @@
 ```bash
 make up                       # sobe a stack (imagens já existentes)
 scripts/stress.sh 120000      # publica 120.000 pedidos + monitora a cada ~15s
+# Com taxa controlada (sustenta exatamente X ev/s):
+KAFKA_BROKERS=localhost:9094 go run ./cmd/load-generator -count 120000 -batch 500 -rate 2000
 ```
 
 O `scripts/stress.sh`:
