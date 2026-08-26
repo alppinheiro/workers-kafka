@@ -358,6 +358,13 @@ forçam comportamento — úteis para reproduzir falha/retry de forma previsíve
 > Ex.: `make create-order ORDER_ID=order-payment-retry-once` demonstra o retry; o journal
 > registra `RETRYING` → sucesso.
 
+**Determinismo (review 2.3):** o sorteio aprovado/recusado é **determinístico por `order_id`**
+(`randForOrder` = hash do orderID como seed) — o mesmo pedido decide igual em qualquer
+instância do worker (consistente em scale horizontal). **Limitação documentada:** o cenário
+`retry-once` conta tentativas em memória por instância; com múltiplas réplicas, o retry
+pode cair em outra instância (aceitável para estudo — em produção o retry é do orquestrador,
+que tem o `retry_count` persistido no banco).
+
 ---
 
 ## 9. Ambientes de Execução

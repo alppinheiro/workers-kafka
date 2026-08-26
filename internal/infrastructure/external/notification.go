@@ -2,17 +2,14 @@ package external
 
 import (
 	"context"
-	"math/rand"
 	"sync"
-	"time"
 )
 
 // NotificationSimulator simula a chamada a uma API externa de notificação, enviando conforme uma taxa configurável.
 type NotificationSimulator struct {
 	deliveryRate float64
 	attempts     map[string]int
-	rng          *rand.Rand
-	// mu protege attempts/rng (goroutines concorrentes com SAGA_WORKERS > 1).
+	// mu protege attempts (goroutines concorrentes com SAGA_WORKERS > 1).
 	mu sync.Mutex
 }
 
@@ -21,7 +18,6 @@ func NewNotificationSimulator(deliveryRate float64) *NotificationSimulator {
 	return &NotificationSimulator{
 		deliveryRate: deliveryRate,
 		attempts:     make(map[string]int),
-		rng:          rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -45,5 +41,5 @@ func (n *NotificationSimulator) Notify(_ context.Context, orderID string) (bool,
 		return true, nil
 	}
 
-	return n.rng.Float64() < n.deliveryRate, nil
+	return randForOrder(orderID).Float64() < n.deliveryRate, nil
 }

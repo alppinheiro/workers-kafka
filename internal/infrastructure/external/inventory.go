@@ -2,17 +2,14 @@ package external
 
 import (
 	"context"
-	"math/rand"
 	"sync"
-	"time"
 )
 
 // InventorySimulator simula a chamada a uma API externa de estoque, reservando conforme uma taxa configurável.
 type InventorySimulator struct {
 	reservationRate float64
 	attempts        map[string]int
-	rng             *rand.Rand
-	// mu protege attempts/rng (goroutines concorrentes com SAGA_WORKERS > 1).
+	// mu protege attempts (goroutines concorrentes com SAGA_WORKERS > 1).
 	mu sync.Mutex
 }
 
@@ -21,7 +18,6 @@ func NewInventorySimulator(reservationRate float64) *InventorySimulator {
 	return &InventorySimulator{
 		reservationRate: reservationRate,
 		attempts:        make(map[string]int),
-		rng:             rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -45,5 +41,5 @@ func (i *InventorySimulator) Reserve(_ context.Context, orderID string) (bool, e
 		return true, nil
 	}
 
-	return i.rng.Float64() < i.reservationRate, nil
+	return randForOrder(orderID).Float64() < i.reservationRate, nil
 }

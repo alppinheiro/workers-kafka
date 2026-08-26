@@ -3,7 +3,6 @@ package external
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"sync"
 	"time"
 )
@@ -13,9 +12,8 @@ type PaymentSimulator struct {
 	approvalRate   float64
 	attempts       map[string]int
 	refundAttempts map[string]int
-	rng            *rand.Rand
-	// mu protege attempts/refundAttempts/rng: os workers processam eventos em
-	// goroutines concorrentes (SAGA_WORKERS > 1) e map/rand não são thread-safe.
+	// mu protege attempts/refundAttempts: os workers processam eventos em
+	// goroutines concorrentes (SAGA_WORKERS > 1) e map não é thread-safe.
 	mu sync.Mutex
 }
 
@@ -25,7 +23,6 @@ func NewPaymentSimulator(approvalRate float64) *PaymentSimulator {
 		approvalRate:   approvalRate,
 		attempts:       make(map[string]int),
 		refundAttempts: make(map[string]int),
-		rng:            rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -50,7 +47,7 @@ func (p *PaymentSimulator) Process(_ context.Context, orderID string) (bool, str
 		return true, tx, nil
 	}
 
-	if p.rng.Float64() < p.approvalRate {
+	if randForOrder(orderID).Float64() < p.approvalRate {
 		tx := fmt.Sprintf("tx-%s-%d", orderID, time.Now().UnixNano())
 		return true, tx, nil
 	}
@@ -79,7 +76,7 @@ func (p *PaymentSimulator) Refund(_ context.Context, orderID string, transaction
 	}
 
 	// Default: refund succeeds according to approvalRate (higher chance to succeed)
-	if p.rng.Float64() < p.approvalRate {
+	if randForOrder(orderID).Float64() < p.approvalRate {
 		return true, nil
 	}
 	return false, nil
