@@ -173,3 +173,59 @@ make aws-down    # destrói tudo (custo ≈ zero)
 2. **ArgoCD (GitOps)**: instalar no cluster e aplicar `deploy/argocd/app.yaml` (etapa 10.4).
 3. **Smoke test e2e da aplicação**: `scripts/k8s-smoke.sh` contra o cluster.
 4. **Escala por lag**: validar KEDA 1→3 réplicas no EKS (como no kind).
+
+---
+
+# ANEXO 2 — Deploy Automático com ArgoCD (GitOps) na AWS
+
+> **Data:** 28/08/2026 (segunda sessão)
+> **Resultado:** ✅ ArgoCD instalado, aplicação deployada via GitOps e **fluxo de sucesso validado (COMPLETED)**
+
+## O que foi feito
+
+1. **Infra** (`make aws-up`): VPC + EKS (4 nodes t3.small SPOT) + RDS free tier.
+2. **ArgoCD instalado** via Helm (`argocd/argo-cd`) no namespace `argocd`.
+3. **Repositório GitHub registrado** no ArgoCD (público — sem token).
+4. **Application `order-saga` criada** apontando para `deploy/helm/order-saga` + `values-prod.yaml`, com `auto-sync` + `prune` + `selfHeal`.
+5. **Ajustes para produção EKS** (via Git, sincronizados automaticamente pelo ArgoCD):
+   - `KAFKA_BROKERS` → `kafka.order-saga.svc.cluster.local:9092` (Kafka KRaft no cluster)
+   - Kafka adicionado ao Helm chart (`templates/kafka.yaml`)
+   - Migrations SQL adicionadas via ConfigMaps (`templates/migrations-configmap.yaml` usando `.Files.Glob`)
+   - Secret do RDS **removido do git** (criado via `kubectl` — prática GitOps segura)
+
+## O momento GitOps (o "deploy automático")
+
+Ao fazer `git push` do commit que mudava o `KAFKA_BROKERS`, o ArgoCD **detectou e sincronizou sozinho**:
+
+```
+Sync Status: Synced to main (0294204)   ← sem nenhum comando manual
+```
+
+E a cada ajuste seguinte (`124e3af` Kafka, `22c9f99` migrations), o ArgoCD aplicou automaticamente.
+
+## Validação de ponta a ponta
+
+| Etapa | Resultado |
+|---|---|
+| 9 deployments + Kafka + KEDA + ArgoCD | ✅ Todos Running |
+| Migrations no RDS | ✅ `sagas`, `saga_events`, `outbox` criados |
+| Pedido `e2e-argocd-002` | ✅ Saga processada (FAILED — falha controlada do simulador) |
+| Pedido `e2e-ok-004` | ✅ **COMPLETED** — saga completa com sucesso |
+| RDS final | `1 COMPLETED` + `1 FAILED` |
+
+## Pendências técnicas resolvidas no caminho
+
+- **EBS CSI driver**: instalado com IAM role dedicada (IRSA) — sem ele o PVC do Kafka não provisiona.
+- **StorageClass `gp2`**: marcada como default (PVC do Kafka precisava).
+- **Node scaling**: 1→2→3→4 nodes (limite de 11 pods/node no t3.small; ArgoCD+KEDA+aplicação precisam de ~35 slots).
+- **Banco `saga_read`**: criado manualmente (RDS cria só o `saga` por padrão).
+- **Secret do RDS**: gerenciado fora do ArgoCD (removido do Helm) para não ser sobrescrito.
+
+## Como repetir (próxima sessão)
+
+```bash
+make aws-up                              # infra
+# depois: instalar ArgoCD + KEDA + Kafka + aplicar secrets (ver roteiro PHASE_10 §10.4)
+git push origin main                     # ArgoCD sincroniza sozinho
+```
+
