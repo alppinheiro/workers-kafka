@@ -1,0 +1,1 @@
+ALTER TABLE outbox ADD COLUMN IF NOT EXISTS traceparent VARCHAR(64);

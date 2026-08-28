@@ -1,0 +1,27 @@
+# ConfigMaps com as migrations SQL do banco de ESCRITA (sagas, saga_events, outbox).
+# Montados no Job order-saga-migrations (volume) e executados pelo migrate/migrate.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-saga-migrations
+  namespace: {{ .Values.namespace }}
+data:
+{{- $files := .Files.Glob "migrations/*.sql" }}
+{{- range $path, $content := $files }}
+  {{ base $path }}: |
+{{ printf "%s" $content | indent 4 }}
+{{- end }}
+---
+# ConfigMaps com as migrations SQL do banco de LEITURA (order_views, processed_events).
+# Montados no Job order-saga-migrations (volume) e executados pelo migrate/migrate.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-saga-migrations-read
+  namespace: {{ .Values.namespace }}
+data:
+{{- $files := .Files.Glob "migrations-read/*.sql" }}
+{{- range $path, $content := $files }}
+  {{ base $path }}: |
+{{ printf "%s" $content | indent 4 }}
+{{- end }}
