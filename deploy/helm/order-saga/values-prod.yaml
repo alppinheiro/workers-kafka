@@ -11,7 +11,7 @@ image:
   # latest = CI publica na main; ArgoCD auto-sync pega a imagem mais recente.
   tag: latest
 
-replicaCount: 2
+replicaCount: 1
 
 # Fase 10/EKS: relay com réplicas dedicadas (gargalo de ingestão) + lote maior.
 relayReplicas: 2
