@@ -39,6 +39,10 @@ module "eks" {
   # Estudo: acesso público ao API server (proteger com o SG do kubeconfig).
   cluster_endpoint_public_access = true
 
+  # Admin do cluster via Access Entry (o IAM principal que executa o terraform).
+  # Sem isso, `kubectl` retorna 401 Unauthorized após criar o cluster.
+  enable_cluster_creator_admin_permissions = true
+
   eks_managed_node_groups = {
     main = {
       desired_size   = var.node_desired_size
@@ -51,6 +55,43 @@ module "eks" {
 
   tags = { Environment = var.environment, Project = "order-saga" }
 }
+
+# --- EBS CSI driver (necessário para PVCs/Kafka no EKS) ---
+# O driver é um addon gerenciado que precisa de uma IAM role dedicada (IRSA).
+# Sem ele, o PVC do Kafka fica Pending para sempre.
+data "aws_iam_policy_document" "ebs_csi_assume" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    principals {
+      type        = "Federated"
+      identifiers = [module.eks.oidc_provider_arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${replace(module.eks.cluster_oidc_issuer_url, "https://", "")}:sub"
+      values   = ["system:serviceaccount:kube-system:ebs-csi-controller-sa"]
+    }
+  }
+}
+
+resource "aws_iam_role" "ebs_csi" {
+  name               = "AmazonEKS_EBS_CSI_DriverRole"
+  assume_role_policy = data.aws_iam_policy_document.ebs_csi_assume.json
+}
+
+resource "aws_iam_role_policy_attachment" "ebs_csi" {
+  role       = aws_iam_role.ebs_csi.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
+
+resource "aws_eks_addon" "ebs_csi" {
+  cluster_name             = module.eks.cluster_name
+  addon_name               = "aws-ebs-csi-driver"
+  addon_version            = "v1.64.0-eksbuild.1"
+  service_account_role_arn = aws_iam_role.ebs_csi.arn
+  depends_on               = [aws_iam_role_policy_attachment.ebs_csi]
+}
+
 
 # --- RDS Postgres (free tier db.t4g.micro) ---
 resource "aws_db_subnet_group" "saga" {

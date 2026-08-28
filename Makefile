@@ -132,9 +132,15 @@ k8s-logs:
 k8s-smoke:
 	bash scripts/k8s-smoke.sh $(ORDER_ID)
 
-# Fase 10 — Cloud AWS (requer: brew install terraform awscli; aws configure)
+# Fase 10 — Cloud AWS (requer: brew install terraform awscli argocd; aws configure)
+# aws-up cria a infra e roda o bootstrap (kubeconfig + saga_read + Secret + ArgoCD + KEDA).
+# aws-bootstrap pode rodar sozinho se a infra já existir.
 aws-up:
 	cd terraform && terraform init && terraform apply -auto-approve
+	bash scripts/aws-bootstrap.sh
+
+aws-bootstrap:
+	bash scripts/aws-bootstrap.sh
 
 aws-down:
 	cd terraform && terraform destroy -auto-approve

@@ -8,6 +8,8 @@ metadata:
   namespace: {{ .Values.namespace }}
 spec:
   accessModes: ["ReadWriteOnce"]
+  # gp2 é a StorageClass padrão do EKS; explícito para não depender do default.
+  storageClassName: gp2
   resources:
     requests:
       storage: 2Gi
