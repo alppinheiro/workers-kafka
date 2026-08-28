@@ -33,10 +33,9 @@ resources:
     memory: "128Mi"
 
 kafka:
-  # Strimzi no EKS (recomendado) OU MSK. Ajustar ao endpoint real:
-  #   Strimzi: <cluster>-kafka-bootstrap.<ns>.svc.cluster.local:9092
-  #   MSK:     b-1.<cluster>.<az>.kafka.<region>.amazonaws.com:9092
-  brokers: "order-saga-kafka-kafka-bootstrap.order-saga.svc.cluster.local:9092"
+  # Kafka KRaft single-node (deploy/k8s/kafka.yaml, Fase 9) — service `kafka`.
+  # Alternativa Strimzi: order-saga-kafka-kafka-bootstrap.<ns>.svc.cluster.local:9092
+  brokers: "kafka.order-saga.svc.cluster.local:9092"
 
 # DATABASE_URL / DATABASE_URL_READ são preenchidos pelo Secret `order-saga-secrets`
 # criado no cluster (kubectl apply) após o terraform apply — NUNCA no git.
