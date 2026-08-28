@@ -31,6 +31,9 @@ spec:
         app.kubernetes.io/name: kafka
         app.kubernetes.io/part-of: order-saga
     spec:
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
       containers:
         - name: kafka
           image: apache/kafka:3.9.0
@@ -70,7 +73,7 @@ spec:
               value: "L-j4cHiMTD6gNiFkZAfo0g"
           volumeMounts:
             - name: data
-              mountPath: /tmp/kraft-combined-logs
+              mountPath: /tmp/kafka-logs
           readinessProbe:
             tcpSocket:
               port: 9092
