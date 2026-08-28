@@ -229,3 +229,60 @@ make aws-up                              # infra
 git push origin main                     # ArgoCD sincroniza sozinho
 ```
 
+
+---
+
+# ANEXO 3 — Persistência do Bootstrap e Destruição Final
+
+> **Data:** 28/08/2026 (encerramento da sessão)
+> **Resultado:** ✅ Tudo persistido no código + infra destruída 100% + custo zero
+
+## 1. Correções persistidas no código (para reconstrução sem erro)
+
+Durante esta sessão, várias coisas foram feitas **manualmente no cluster** e que quebrariam
+num rebuild. **Todas foram persistidas no git** (commit `22bc738`):
+
+| Correção | Antes (manual) | Agora (no código) |
+|---|---|---|
+| EBS CSI driver | `aws eks create-addon` manual | `aws_eks_addon` no `terraform/main.tf` + IAM role IRSA |
+| Admin do cluster | Access Entry manual (`create-access-entry`) | `enable_cluster_creator_admin_permissions` no Terraform |
+| StorageClass do PVC | `kubectl patch storageclass gp2` manual | `storageClassName: gp2` no `templates/kafka.yaml` |
+| Kafka mountPath | ajuste manual | `mountPath: /tmp/kafka-logs` (log.dirs real) |
+| Kafka fsGroup | patch manual | `securityContext.fsGroup: 1000` |
+| `lost+found` do EBS | `rm` manual | initContainer `fix-lost-found` no template |
+| 8 partições | `--alter` manual | `--partitions 8` no kafka-init do chart |
+| `sagaWorkers` | — | `sagaWorkers: 1` no `values-prod.yaml` (single-node) |
+| kubeconfig + saga_read + Secret + ArgoCD + KEDA | 100% manual | **`scripts/aws-bootstrap.sh`** (automatizado) |
+
+**Fluxo de reconstrução agora é 1 comando:**
+```bash
+AWS_PROFILE=lab-pessoal make aws-up    # terraform apply + bootstrap completo
+# (depois: kubectl port-forward svc/argocd-server 8080:443 e login)
+```
+
+## 2. Destruição completa verificada
+
+| Recurso | Status |
+|---|---|
+| `terraform destroy` | ✅ `Destroy complete! Resources: 57 destroyed.` |
+| Estado Terraform | ✅ 0 recursos |
+| EKS clusters (todas as regiões) | ✅ 0 |
+| EC2 ativas | ✅ 0 |
+| RDS | ✅ 0 |
+| VPC / NAT / EIP | ✅ 0 / deleted / 0 |
+| EBS in-use / Load Balancers / CloudWatch | ✅ 0 / 0 / 0 |
+| Security Groups (`order-saga*`) | ✅ 0 |
+| IAM roles (EBS_CSI, order-saga, eks-node) | ✅ 0 (role manual deletada) |
+| KMS | ✅ default AWS (grátis) + `order-saga` em PendingDeletion (auto em 7d) |
+| `terraform.tfvars` (senha RDS) | ✅ removido do disco |
+
+**Conclusão: conta 100% limpa. Custo residual: US$ 0.**
+
+## 3. Lições da sessão (importantes)
+
+1. **`sagaWorkers>1` exige Kafka multi-broker** — no single-node causa loop de reconexão.
+2. **O EBS CSI driver é obrigatório** para PVCs no EKS (sem ele, PVC fica Pending).
+3. **O volume EBS monta como root** — precisa de `fsGroup` + initContainer para limpar `lost+found`.
+4. **O ArgoCD com `prune`** remove recursos fora do git — segredos devem ser criados **fora** do Helm.
+5. **Jobs imutáveis** no ArgoCD: mudanças de spec exigem deletar o Job antigo.
+
