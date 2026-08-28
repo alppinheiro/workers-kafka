@@ -34,6 +34,17 @@ spec:
       securityContext:
         fsGroup: 1000
         runAsUser: 1000
+      # Remove o diretório lost+found criado pelo filesystem EBS (o Kafka reclama dele).
+      # Sem isso o broker falha com "Found directory /tmp/kafka-logs/lost+found".
+      initContainers:
+        - name: fix-lost-found
+          image: alpine:3.20
+          command: ["/bin/sh", "-c"]
+          args:
+            - rm -rf /tmp/kafka-logs/lost+found && echo "lost+found removido"
+          volumeMounts:
+            - name: data
+              mountPath: /tmp/kafka-logs
       containers:
         - name: kafka
           image: apache/kafka:3.9.0
