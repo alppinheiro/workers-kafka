@@ -1,12 +1,14 @@
 # Valores de PRODUÇÃO (Fase 10 - EKS). Aplicados via Helm/ArgoCD (values-prod.yaml).
-# Endpoints cloud: ajustar conforme o output do Terraform / Kafka do cluster.
+# Estratégia GitOps: endpoints de infra que mudam a cada apply (RDS) NÃO ficam
+# hardcoded aqui — são injetados via Secret no cluster (ver docs/AWS_SESSION_REPORT.md).
+# Este arquivo é versionado; segredos nunca entram no git.
 
 namespace: order-saga
 
 image:
   repository: ghcr.io/alppinheiro
   pullPolicy: IfNotPresent
-  # tag: v0.1.0  # trocar pela versão real (criar tag semver no CI) — ver PHASE_10 §10.3
+  # latest = CI publica na main; ArgoCD auto-sync pega a imagem mais recente.
   tag: latest
 
 replicaCount: 1
@@ -36,11 +38,11 @@ kafka:
   #   MSK:     b-1.<cluster>.<az>.kafka.<region>.amazonaws.com:9092
   brokers: "order-saga-kafka-kafka-bootstrap.order-saga.svc.cluster.local:9092"
 
+# DATABASE_URL / DATABASE_URL_READ são preenchidos pelo Secret `order-saga-secrets`
+# criado no cluster (kubectl apply) após o terraform apply — NUNCA no git.
 postgres:
-  # RDS (endpoint do output `rds_endpoint`). Credenciais via Secret (kubectl/ExternalSecret)
-  # — os valores abaixo são placeholder, NÃO commitar senha real.
-  writeUrl: "postgres://saga:CHANGE_ME@order-saga-db.REGION.rds.amazonaws.com:5432/saga?sslmode=require"
-  readUrl: "postgres://saga:CHANGE_ME@order-saga-db.REGION.rds.amazonaws.com:5432/saga_read?sslmode=require"
+  writeUrl: "CHANGE_ME_VIA_SECRET"
+  readUrl: "CHANGE_ME_VIA_SECRET"
 
 otel:
   # Collector/observabilidade no cluster (10.5); sem scheme (WithInsecure no exporter).
@@ -52,3 +54,4 @@ keda:
   lagThreshold: 200
   minReplicas: 1
   maxReplicas: 3
+

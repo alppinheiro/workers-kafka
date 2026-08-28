@@ -19,7 +19,7 @@ spec:
         - values-prod.yaml
       parameters:
         - name: image.tag
-          value: v0.1.0 # trocar pela tag semver real (CI publica :latest + :vX.Y.Z)
+          value: latest # CI publica :latest na main (Fase 8) — auto-deploy via ArgoCD
   destination:
     server: https://kubernetes.default.svc
     namespace: order-saga
@@ -29,3 +29,11 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+  # Segredos reais (RDS) são aplicados no cluster via kubectl — o ArgoCD não deve
+  # sobrescrevê-los com os placeholders do git (selfHeal não age no Secret).
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      jsonPointers:
+        - /data
+
