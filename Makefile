@@ -144,3 +144,4 @@ aws-bootstrap:
 
 aws-down:
 	cd terraform && terraform destroy -auto-approve
+	bash scripts/aws-cleanup.sh <<< "y"
