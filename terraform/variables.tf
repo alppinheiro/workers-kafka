@@ -31,17 +31,17 @@ variable "node_instance_types" {
 
 variable "node_desired_size" {
   type    = number
-  default = 1
+  default = 4
 }
 
 variable "node_min_size" {
   type    = number
-  default = 1
+  default = 2
 }
 
 variable "node_max_size" {
   type    = number
-  default = 3
+  default = 5
 }
 
 variable "node_capacity_type" {
