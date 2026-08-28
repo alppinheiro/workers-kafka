@@ -47,7 +47,7 @@ otel:
   # Collector/observabilidade no cluster (10.5); sem scheme (WithInsecure no exporter).
   endpoint: "opentelemetry-collector.observability.svc.cluster.local:4318"
 
-sagaWorkers: 1
+sagaWorkers: 3
 
 keda:
   lagThreshold: 200

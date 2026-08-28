@@ -97,7 +97,7 @@ spec:
       port: 9092
       targetPort: 9092
 ---
-# Cria os tópicos do pipeline (4 partições; DLQ com 1) - mesmo papel do kafka-init do compose.
+# Cria os tópicos do pipeline (8 partições para paralelismo; DLQ com 1) - mesmo papel do kafka-init do compose.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -124,7 +124,7 @@ spec:
           args:
             - |
               for t in orders.created orders.status orders.payment.cmd orders.payment.result orders.inventory.cmd orders.inventory.result orders.notification.cmd orders.notification.result; do
-                /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$t" --partitions 4 --replication-factor 1
+                /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$t" --partitions 8 --replication-factor 1
               done
               for t in orders.created.dlq orders.status.dlq orders.payment.cmd.dlq orders.payment.result.dlq orders.inventory.cmd.dlq orders.inventory.result.dlq orders.notification.cmd.dlq orders.notification.result.dlq; do
                 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$t" --partitions 1 --replication-factor 1
