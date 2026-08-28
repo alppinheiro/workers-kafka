@@ -104,7 +104,7 @@ O IAM user root não tinha acesso ao EKS (`401 Unauthorized`). **Correção:** c
 | Recurso | Quantidade encontrada | Status |
 |---|---|---|
 | Instâncias EC2 | 1 (estado `terminated`) | ✅ nada ativo |
-| Clusters EKS | 0 | ✅ |
+| Clusters EKS (todas as 17 regiões) | 0 | ✅ |
 | Instâncias RDS | 0 | ✅ |
 | VPCs (`order-saga*`) | 0 | ✅ |
 | NAT Gateways | 1 (estado `deleted`) | ✅ |
@@ -114,7 +114,30 @@ O IAM user root não tinha acesso ao EKS (`401 Unauthorized`). **Correção:** c
 | Security Groups (`order-saga*`) | 0 | ✅ |
 | **Estado Terraform** | **0 recursos** | ✅ |
 
+### 5.1 Auditoria extra (todos os serviços que geram custo)
+
+| Serviço | Resultado | Status |
+|---|---|---|
+| EC2 (17 regiões) | 0 ativas | ✅ |
+| RDS (16 regiões) | 0 | ✅ |
+| ECS Clusters | `[]` | ✅ |
+| ElastiCache | 0 | ✅ |
+| OpenSearch | `[]` | ✅ |
+| DocumentDB | 0 | ✅ |
+| CloudFormation stacks | `[]` | ✅ |
+| Load Balancers (ELBv2) | 0 | ✅ |
+| EBS volumes in-use | 0 | ✅ |
+| RDS Snapshots | 0 | ✅ |
+| AMIs próprias | 0 | ✅ |
+| CloudWatch Log Groups | `[]` | ✅ |
+| **KMS Keys** | 2 (ver abaixo) | ✅ |
+
+**KMS Keys (detalhe):**
+1. `1f97a31d` — *"Default key that protects my RDS database volumes"* → **gerenciada pela AWS**, presente em toda conta, **gratuita**.
+2. `262a8a64` — *"order-saga cluster encryption key"* → criada pelo EKS, já em **`PendingDeletion`** (exclusão automática em 7 dias, sem custo).
+
 **Conclusão: infraestrutura destruída 100%, sem recursos órfãos ou cobranças residuais.**
+
 
 ---
 
