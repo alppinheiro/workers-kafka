@@ -142,7 +142,7 @@ data:
     providers:
       - name: sagas
         orgId: 1
-        folder: ''
+        folder: Sagas
         type: file
         disableDeletion: false
         editable: true
