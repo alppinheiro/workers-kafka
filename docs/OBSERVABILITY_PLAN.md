@@ -1,9 +1,10 @@
 # 📊 Observabilidade — Plano de Evolução (Grafana + Prometheus + Traces)
 
-> **Status:** planejamento aprovado em 03/09/2026. **Fase A concluída** (métricas P0 +
+> **Status:** planejamento aprovado em 03/09/2026. **Fases A e C concluídas** (métricas P0 +
 > buckets finos + docs) e **parte da Fase B** (regras novas em `prometheus/rules.yml`;
-> Alertmanager/notificação pendente). Próximas: Fase C (dashboards D0–D5) e Fase D
-> (traces no kind + fix do endpoint OTLP).
+> Alertmanager/notificação pendente). Dashboards: D0 enriquecido (14 painéis) + D1 `saga-flow`,
+> D2 `kafka-consumers`, D3 `saga-outbox`, D4 `saga-postgres`, D5 `saga-infra`. Próximas:
+> **Fase D (traces no kind + fix do endpoint OTLP)** e E (Loki).
 > Escopo: enriquecer o monitoramento do fluxo de saga (orquestrador + workers + projector +
 > outbox-relay) com dashboards acionáveis, novas métricas, alertas/SLO e correlação
 > métrica ↔ trace ↔ log, válido para docker-compose e Kubernetes (kind/EKS).
