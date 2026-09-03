@@ -34,7 +34,7 @@ var (
 	processDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "saga_process_duration_seconds",
 		Help:    "Latência do handler por serviço.",
-		Buckets: prometheus.DefBuckets,
+		Buckets: processBuckets,
 	}, []string{"service"})
 
 	eventsPublished = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -76,7 +76,47 @@ var (
 		Name: "saga_consumer_lag",
 		Help: "Lag do consumer group por tópico (mensagens não processadas).",
 	}, []string{"group", "topic"})
+
+	// --- Métricas P0 (plano de observabilidade docs/OBSERVABILITY_PLAN.md) ----------
+
+	ordersTerminal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "saga_orders_terminal_total",
+		Help: "Sagas encerradas em estado terminal (outcome=COMPLETED|FAILED). Counter incremental p/ rate() e success rate.",
+	}, []string{"outcome"})
+
+	sagaMaxAge = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "saga_saga_max_age_seconds",
+		Help: "Idade (s) da saga mais antiga ainda em status intermediário.",
+	}, []string{"status"})
+
+	dlqDepth = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "saga_dlq_depth",
+		Help: "Quantidade de mensagens acumuladas em cada tópico de DLQ (fim do tópico).",
+	}, []string{"topic"})
+
+	consumerLastProgress = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "saga_consumer_last_progress_seconds",
+		Help: "Tempo (s) desde o último progresso (fetch) do reader de cada serviço.",
+	}, []string{"service"})
+
+	consumerReconnects = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "saga_consumer_reconnects_total",
+		Help: "Reconexões do reader (watchdog anti-stall) por serviço.",
+	}, []string{"service"})
+
+	outboxGenerated = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "saga_outbox_generated_total",
+		Help: "Eventos registrados na outbox aguardando publicação (todas as publicações por outbox).",
+	})
 )
+
+// processBuckets é mais fino que o DefBuckets do client_golang (começa em 5ms):
+// os handlers do pipeline costumam terminar em poucos ms; buckets até 10s cobrem
+// outliers/retries sem perder resolução no p50/p95.
+var processBuckets = []float64{
+	0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1,
+	0.25, 0.5, 1, 2.5, 5, 10,
+}
 
 func init() {
 	prometheus.MustRegister(
@@ -85,6 +125,8 @@ func init() {
 		outboxPending, outboxPublished,
 		ordersPending, ordersCompleted, ordersFailed,
 		outboxMaxAge, consumerLag,
+		ordersTerminal, sagaMaxAge, dlqDepth,
+		consumerLastProgress, consumerReconnects, outboxGenerated,
 	)
 }
 
@@ -143,6 +185,42 @@ func SetOutboxMaxAge(seconds float64) {
 
 func SetConsumerLag(group, topic string, n int64) {
 	consumerLag.WithLabelValues(group, topic).Set(float64(n))
+}
+
+// RecordTerminal incrementa o contador de sagas encerradas (outcome: COMPLETED|FAILED).
+func RecordTerminal(outcome string) {
+	ordersTerminal.WithLabelValues(outcome).Inc()
+}
+
+// ResetSagaMaxAge limpa os labels de status antes de um novo ciclo de coleta
+// (anti-gauge-stale, mesmo comportamento do ResetOrdersPending).
+func ResetSagaMaxAge() {
+	sagaMaxAge.Reset()
+}
+
+// SetSagaMaxAge atualiza a idade (s) da saga mais antiga em um status intermediário.
+func SetSagaMaxAge(status string, seconds float64) {
+	sagaMaxAge.WithLabelValues(status).Set(seconds)
+}
+
+// SetDLQDepth atualiza a quantidade de mensagens acumuladas em um tópico de DLQ.
+func SetDLQDepth(topic string, n int64) {
+	dlqDepth.WithLabelValues(topic).Set(float64(n))
+}
+
+// SetConsumerLastProgress atualiza o tempo desde o último progresso (fetch) do reader.
+func SetConsumerLastProgress(service string, seconds float64) {
+	consumerLastProgress.WithLabelValues(service).Set(seconds)
+}
+
+// RecordConsumerReconnect incrementa o contador de reconexões do reader (watchdog).
+func RecordConsumerReconnect(service string) {
+	consumerReconnects.WithLabelValues(service).Inc()
+}
+
+// RecordOutboxGenerated incrementa o contador de eventos registrados na outbox.
+func RecordOutboxGenerated() {
+	outboxGenerated.Inc()
 }
 
 // Serve inicia (em goroutine) um servidor HTTP com /metrics e /healthz na porta indicada.

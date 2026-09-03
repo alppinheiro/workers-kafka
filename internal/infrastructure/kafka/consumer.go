@@ -161,6 +161,7 @@ func (c *Consumer) consumeWorker(ctx context.Context, handler application.EventH
 				// Stall detectado pelo watchdog: reconecta o reader (self-healing).
 				_ = flush()
 				slog.Info("reconectando reader", "component", "consumer", "phase", "reconnect", "service", c.serviceName)
+				metrics.RecordConsumerReconnect(c.serviceName)
 				if closeErr := reader.Close(); closeErr != nil {
 					slog.Error("erro ao fechar reader", "component", "consumer", "phase", "reconnect-close", "error", closeErr)
 				}
@@ -361,6 +362,7 @@ func (c *Consumer) watchdogStall(reader *kafkago.Reader, cancel context.CancelFu
 		case <-ticker.C:
 			stats := reader.Stats()
 			now := time.Now()
+			metrics.SetConsumerLastProgress(c.serviceName, now.Sub(lastProgress).Seconds())
 			if stats.Fetches > lastFetches {
 				lastFetches = stats.Fetches
 				lastProgress = now

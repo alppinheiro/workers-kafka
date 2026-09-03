@@ -1,6 +1,9 @@
 # 📊 Observabilidade — Plano de Evolução (Grafana + Prometheus + Traces)
 
-> **Status:** planejamento aprovado em 03/09/2026 — implementação em andamento por fases (A→F).
+> **Status:** planejamento aprovado em 03/09/2026. **Fase A concluída** (métricas P0 +
+> buckets finos + docs) e **parte da Fase B** (regras novas em `prometheus/rules.yml`;
+> Alertmanager/notificação pendente). Próximas: Fase C (dashboards D0–D5) e Fase D
+> (traces no kind + fix do endpoint OTLP).
 > Escopo: enriquecer o monitoramento do fluxo de saga (orquestrador + workers + projector +
 > outbox-relay) com dashboards acionáveis, novas métricas, alertas/SLO e correlação
 > métrica ↔ trace ↔ log, válido para docker-compose e Kubernetes (kind/EKS).
@@ -76,7 +79,7 @@ status, idade da outbox) e Kafka (`ListOffsets`/`OffsetFetch`) a cada 10s.
 | `saga_dlq_depth` | gauge | `topic` | metrics-exporter (`ListOffsets` nos tópicos `.dlq`) |
 | `saga_consumer_last_progress_seconds` | gauge | `service` | consumer (watchdog `lastProgress`) |
 | `saga_consumer_reconnects_total` | counter | `service` | consumer (ponto do `reconnect`) |
-| `saga_outbox_generated_total` | counter | service | onde eventos são enfileirados na outbox |
+| `saga_outbox_generated_total` | counter | – | outbox `Publisher` (toda gravação na outbox; a persistência não registra o serviço → contador global) |
 
 ### P1
 

@@ -28,6 +28,16 @@ var (
 	consumerGroups = []string{"orchestrator", "worker-payment", "worker-inventory", "worker-notification", "projector", "order-status"}
 	flowTopics     = infrakafka.FlowTopics()
 	flowPartitions = []int{0, 1, 2, 3}
+
+	// flowDLQTopics são os tópicos de DLQ do pipeline (1 partição cada no compose/kind).
+	flowDLQTopics = func() []string {
+		dlqs := make([]string, 0, len(flowTopics))
+		for _, t := range flowTopics {
+			dlqs = append(dlqs, infrakafka.DLQTopicFor(t))
+		}
+		return dlqs
+	}()
+	dlqPartitions = []int{0}
 )
 
 func main() {
@@ -56,8 +66,10 @@ func main() {
 			return
 		case <-time.After(refreshInterval):
 			refreshSagas(ctx, pool)
+			refreshSagaAges(ctx, pool)
 			refreshOutboxAge(ctx, pool)
 			refreshConsumerLag(ctx, client, addr)
+			refreshDLQDepth(ctx, client, addr)
 		}
 	}
 }
@@ -93,6 +105,67 @@ func refreshSagas(ctx context.Context, pool *pgxpool.Pool) {
 
 	metrics.SetOrdersCompleted(totalCompleted)
 	metrics.SetOrdersFailed(totalFailed)
+}
+
+// refreshSagaAges expõe a idade (s) da saga mais antiga ainda em cada status
+// intermediário — permite alertar "pedido preso" sem depender de logs.
+func refreshSagaAges(ctx context.Context, pool *pgxpool.Pool) {
+	rows, err := pool.Query(ctx, `
+		SELECT current_status, COALESCE(EXTRACT(EPOCH FROM (now() - MAX(created_at))), 0)
+		FROM sagas
+		WHERE current_status NOT IN ('COMPLETED', 'FAILED')
+		GROUP BY current_status`)
+	if err != nil {
+		slog.Error("erro ao consultar idade das sagas", "error", err)
+		return
+	}
+	defer rows.Close()
+
+	metrics.ResetSagaMaxAge()
+	for rows.Next() {
+		var status string
+		var seconds float64
+		if err := rows.Scan(&status, &seconds); err != nil {
+			slog.Error("erro ao ler idade da saga", "error", err)
+			return
+		}
+		metrics.SetSagaMaxAge(status, seconds)
+	}
+}
+
+// refreshDLQDepth expõe quantas mensagens estão acumuladas em cada tópico de DLQ
+// (offset final do tópico; DLQ não é consumida — o depth é o backlog real).
+func refreshDLQDepth(ctx context.Context, client *kafkago.Client, addr net.Addr) {
+	req := &kafkago.ListOffsetsRequest{
+		Addr:           addr,
+		Topics:         map[string][]kafkago.OffsetRequest{},
+		IsolationLevel: kafkago.ReadUncommitted,
+	}
+	for _, dlq := range flowDLQTopics {
+		parts := make([]kafkago.OffsetRequest, 0, len(dlqPartitions))
+		for _, p := range dlqPartitions {
+			parts = append(parts, kafkago.LastOffsetOf(p))
+		}
+		req.Topics[dlq] = parts
+	}
+
+	resp, err := client.ListOffsets(ctx, req)
+	if err != nil {
+		slog.Error("erro ao ler fim das DLQs", "error", err)
+		return
+	}
+
+	for _, dlq := range flowDLQTopics {
+		parts, ok := resp.Topics[dlq]
+		if !ok {
+			continue
+		}
+		for _, p := range parts {
+			if p.Partition == 0 && p.Error == nil {
+				metrics.SetDLQDepth(dlq, p.LastOffset)
+			}
+		}
+	}
 }
 
 // refreshOutboxAge atualiza a idade (em segundos) do evento mais antigo ainda não

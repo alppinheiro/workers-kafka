@@ -530,9 +530,19 @@ saga_orders_pending
 | `saga_consumer_lag{group,topic}` | gauge | lag por consumer group |
 | `saga_outbox_max_age_seconds` | gauge | idade do evento mais antigo não publicado |
 | `saga_orders_pending{status}` / `saga_orders_completed_total` / `saga_orders_failed_total` | gauges | sagas por status (metrics-exporter) |
+| `saga_orders_terminal_total{outcome}` | counter | sagas encerradas (COMPLETED/FAILED) — base p/ success rate (P0) |
+| `saga_saga_max_age_seconds{status}` | gauge | idade da saga mais antiga em cada status intermediário (P0) |
+| `saga_dlq_depth{topic}` | gauge | mensagens acumuladas na DLQ por tópico (P0) |
+| `saga_consumer_last_progress_seconds{service}` | gauge | tempo desde o último progresso (fetch) do reader (P0) |
+| `saga_consumer_reconnects_total{service}` | counter | reconexões do reader pelo watchdog anti-stall (P0) |
+| `saga_outbox_generated_total` | counter | eventos registrados na outbox aguardando publicação (P0) |
 
-**Alertas** (`prometheus/rules.yml`): `SagaDLQGrowth` (DLQ crescendo) e
-`SagaConsumerStalled` (sem progresso com lag).
+> O histograma `saga_process_duration_seconds` usa buckets finos (1ms→10s) para
+> resolver bem o p50/p95 dos handlers do pipeline (P0).
+
+**Alertas** (`prometheus/rules.yml`): `SagaDLQGrowth`, `SagaConsumerStalled`,
+`SagaStuckInStatus` (pedido preso por status), `OutboxAging`, `DLQDepth`,
+`ConsumerReconnectLoop`, `ErrorBudgetBurn` (SLO de 5% de falhas) e `ServiceDown`/`ServiceRestart`.
 
 **Probes de saúde (`/healthz`, portas 9101–9107):** cada serviço responde `200` somente com
 conectividade real — `health.Postgres` (Ping/`SELECT 1`) e `health.Kafka` (dial+handshake);

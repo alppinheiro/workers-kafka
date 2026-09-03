@@ -10,6 +10,7 @@ import (
 
 	"workers-kafka/internal/domain"
 	infrakafka "workers-kafka/internal/infrastructure/kafka"
+	metrics "workers-kafka/internal/infrastructure/metrics"
 	infrapostgres "workers-kafka/internal/infrastructure/persistence/postgres"
 )
 
@@ -37,13 +38,29 @@ func (p *Publisher) Publish(ctx context.Context, event domain.Event) error {
 		return fmt.Errorf("erro ao serializar evento %s: %w", event.EventID, err)
 	}
 
-	return p.outbox.Append(ctx, infrapostgres.OutboxEntry{
+	if err := p.outbox.Append(ctx, infrapostgres.OutboxEntry{
 		EventID:     event.EventID,
 		Topic:       topic,
 		Key:         event.OrderID,
 		Payload:     payload,
 		Traceparent: extractTraceparent(ctx),
-	})
+	}); err != nil {
+		return err
+	}
+	afterAppend(event)
+	return nil
+}
+
+// afterAppend registra métricas P0 após enfileirar na outbox: eventos gerados (todos)
+// e o outcome terminal (COMPLETED/FAILED) quando o evento encerra a saga.
+func afterAppend(event domain.Event) {
+	metrics.RecordOutboxGenerated()
+	switch event.EventType {
+	case domain.EventOrderCompleted:
+		metrics.RecordTerminal("COMPLETED")
+	case domain.EventOrderFailed:
+		metrics.RecordTerminal("FAILED")
+	}
 }
 
 // extractTraceparent serializa o trace corrente (W3C traceparent) para ser propagado

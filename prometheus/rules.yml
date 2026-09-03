@@ -18,3 +18,67 @@ groups:
         annotations:
           summary: "Consumer sem progresso com backlog"
           description: "O serviço {{ $labels.service }} não processou eventos nos últimos 5 minutos e há lag acumulado."
+
+      - alert: SagaStuckInStatus
+        expr: saga_saga_max_age_seconds > 30
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pedido preso em etapa"
+          description: "Existe saga em {{ $labels.status }} parada há mais de 30s (idade do pedido mais antigo)."
+
+      - alert: OutboxAging
+        expr: saga_outbox_max_age_seconds > 30
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Outbox envelhecendo"
+          description: "O evento mais antigo da outbox está há mais de 30s sem publicação."
+
+      - alert: DLQDepth
+        expr: saga_dlq_depth > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Acúmulo na DLQ"
+          description: "O tópico {{ $labels.topic }} tem {{ $value }} mensagens na DLQ."
+
+      - alert: ConsumerReconnectLoop
+        expr: increase(saga_consumer_reconnects_total[5m]) > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Loop de reconexão do consumer"
+          description: "O reader de {{ $labels.service }} reconectou mais de 3 vezes em 5 minutos (possível stall kafka-go)."
+
+      - alert: ErrorBudgetBurn
+        expr: sum(rate(saga_orders_terminal_total{outcome="FAILED"}[10m])) / clamp_min(sum(rate(saga_orders_terminal_total[10m])), 1) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Taxa de falha acima do orçamento (SLO)"
+          description: "Mais de 5% das sagas terminaram em FAILED na última janela de 10 minutos."
+
+      - alert: ServiceDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Serviço fora do ar"
+          description: "O target {{ $labels.job }} ({{ $labels.instance }}) está sem resposta há mais de 2 minutos."
+
+      - alert: ServiceRestart
+        expr: changes(process_start_time_seconds[10m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Serviço reiniciou"
+          description: "O processo de {{ $labels.job }} reiniciou na última janela de 10 minutos."
+
