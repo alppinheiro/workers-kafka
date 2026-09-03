@@ -2,7 +2,7 @@ COMPOSE ?= docker-compose
 ORDER_ID ?= order-001
 SERVICES = kafka kafka-init postgres migrations postgres-read migrations-read jaeger prometheus grafana orchestrator worker-payment worker-inventory worker-notification order-status projector outbox-relay metrics-exporter
 
-.PHONY: help fmt build vet test lint check ci integration up down logs ps create-order inspect rebuild k8s-up k8s-down k8s-logs k8s-smoke aws-up aws-down
+.PHONY: help fmt build vet test lint check ci integration up down logs ps create-order inspect rebuild k8s-up k8s-images k8s-refresh k8s-down k8s-logs k8s-smoke aws-up aws-down
 
 help:
 	@echo "Targets disponiveis:"
@@ -22,6 +22,8 @@ help:
 	@echo "  make autoscale     - roda o autoscaler (lag -> docker-compose scale) no host"
 	@echo "  make rebuild       - rebuild da stack antes de subir"
 	@echo "  make k8s-up        - sobe cluster kind + Kafka + Postgres + Helm chart (Fase 9)"
+	@echo "  make k8s-images    - atualiza as imagens da app p/ GHCR :latest e reinicia (rollout restart)"
+	@echo "  make k8s-refresh   - alias do k8s-images (use apos religar o cluster para sempre subir atualizado)"
 	@echo "  make k8s-down      - derruba o cluster kind e remove os recursos"
 	@echo "  make k8s-logs      - segue os logs de um deployment (SVC=<nome>)"
 	@echo "  make k8s-smoke     - smoke e2e no cluster (ORDER_ID=<id>) - scripts/k8s-smoke.sh"
@@ -96,6 +98,20 @@ rebuild:
 # ============================================================================
 K8S_NAMESPACE ?= order-saga
 K8S_IMG_TAG ?= latest
+# Nome do cluster kind (vem do kind-config.yaml) e contexto kubectl correspondente.
+K8S_CLUSTER ?= $(shell awk '/^name:/{print $$2; exit}' deploy/k8s/kind-config.yaml)
+K8S_CONTEXT ?= kind-$(K8S_CLUSTER)
+# Deployments da aplicacao (nao inclui infra kafka/postgres). Sao os que usam as
+# imagens ghcr.io/alppinheiro/workers-kafka-<svc> e os consumidores kafka-go.
+K8S_APP_DEPLOYMENTS = order-saga-orchestrator order-saga-worker-payment order-saga-worker-inventory order-saga-worker-notification order-saga-projector order-saga-outbox-relay order-saga-order-status order-saga-metrics-exporter
+# Repositorio de imagens publicado pelo CI (Fase 8) em ghcr.io/<owner>.
+K8S_IMG_REPO ?= ghcr.io/alppinheiro
+# Apos o rollout restart, aguarda os consumers estabilizarem antes de retornar OK.
+# Motivo: o reader kafka-go pode iniciar "travado" (stall) e o watchdog anti-stall
+# reconecta em ~45-90s (documentado no BENCHMARK.md); sem esse warm-up, um smoke
+# disparado logo apos o refresh pode validar durante a janela de stall.
+# Use K8S_WARMUP=0 para pular a espera.
+K8S_WARMUP ?= 75
 
 k8s-up:
 	kind create cluster --config deploy/k8s/kind-config.yaml
@@ -117,9 +133,35 @@ k8s-up:
 	kubectl create configmap order-saga-migrations-read --from-file=migrations-read/ -n $(K8S_NAMESPACE) \
 		-o yaml --dry-run=client | kubectl apply -f -
 	helm upgrade --install order-saga deploy/helm/order-saga -n $(K8S_NAMESPACE) \
-		--set image.tag=$(K8S_IMG_TAG)
+		--set image.tag=$(K8S_IMG_TAG) \
+		--set image.pullPolicy=Always
 	kubectl wait --for=condition=complete job/order-saga-migrations -n $(K8S_NAMESPACE) --timeout=120s
 	kubectl rollout status deployment -n $(K8S_NAMESPACE) --timeout=180s
+
+# Forca a atualizacao das imagens da app no cluster SEM recriar a infra/cluster.
+# Util depois de religar o Colima/kind (o node cacheia imagens antigas) ou quando
+# o CI publicar um :latest novo no GHCR: seta imagePullPolicy=Always, faz rollout
+# restart (kubelet re-puxa do GHCR) e aguarda os Deployments ficarem saudaveis.
+# Guarda de seguranca: so roda no cluster kind (nunca na AWS/EKS).
+k8s-images:
+	@test "$$(kubectl config current-context)" = "$(K8S_CONTEXT)" || { echo "ERRO: contexto atual nao e $(K8S_CONTEXT) (kubectl use-context $(K8S_CONTEXT))"; exit 1; }
+	@echo "== atualizando imagens da app ($(K8S_IMG_REPO)/workers-kafka-<svc>:$(K8S_IMG_TAG)) =="
+	@for d in $(K8S_APP_DEPLOYMENTS); do \
+		kubectl -n $(K8S_NAMESPACE) patch deployment $$d --type=json \
+			-p '[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"Always"}]' >/dev/null || exit 1; \
+		echo "  $$d -> imagePullPolicy=Always"; \
+	done
+	@echo "== rollout restart (re-pull das imagens) =="
+	kubectl -n $(K8S_NAMESPACE) rollout restart deployment $(K8S_APP_DEPLOYMENTS)
+	kubectl -n $(K8S_NAMESPACE) rollout status deployment $(K8S_APP_DEPLOYMENTS) --timeout=240s
+	@if [ "$(K8S_WARMUP)" -gt 0 ] 2>/dev/null; then \
+		echo "== warm-up de $(K8S_WARMUP)s (estabilizacao dos consumers apos o restart) =="; \
+		sleep $(K8S_WARMUP); \
+	fi
+	@echo "OK: imagens da app atualizadas para $(K8S_IMG_TAG) e Deployments saudaveis."
+
+# Alias semanticamente mais claro: use apos "subir" (religar Colima/cluster).
+k8s-refresh: k8s-images
 
 k8s-down:
 	helm uninstall order-saga -n $(K8S_NAMESPACE) 2>/dev/null || true
