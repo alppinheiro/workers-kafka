@@ -469,6 +469,14 @@ kubectl -n order-saga logs deploy/order-saga-orchestrator | grep 'meu-pedido'
 kubectl -n order-saga logs deploy/order-saga-worker-payment   | grep 'meu-pedido'
 ```
 
+**Traces (Jaeger no kind):**
+
+```bash
+kubectl -n order-saga get deploy order-saga-jaeger   # destino OTLP (Service order-saga-otel:4318)
+kubectl -n order-saga port-forward svc/order-saga-otel 16686:16686
+# UI em http://localhost:16686 - buscar por order_id e seguir orquestrador -> worker -> orquestrador
+```
+
 ---
 
 ## 12. Atualizar as Imagens da Aplicação (`make k8s-images`)

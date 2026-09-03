@@ -123,6 +123,8 @@ k8s-up:
 	# Infra: Postgres (escrita/leitura) + Kafka (apache/kafka KRaft, tópicos via Job kafka-init)
 	kubectl apply -f deploy/k8s/postgres.yaml
 	kubectl apply -f deploy/k8s/kafka.yaml
+	# Jaeger all-in-one (destino OTLP dos traces - Fase D; Service order-saga-otel)
+	kubectl apply -f deploy/k8s/otel.yaml
 	kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=postgres -n $(K8S_NAMESPACE) --timeout=120s
 	kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=postgres-read -n $(K8S_NAMESPACE) --timeout=120s
 	kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=kafka -n $(K8S_NAMESPACE) --timeout=180s

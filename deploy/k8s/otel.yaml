@@ -1,0 +1,72 @@
+# Jaeger all-in-one (Fase D - observabilidade/kind): destino OTLP dos serviços.
+# O chart (values.yaml) já aponta o endpoint OTLP para `order-saga-otel:4318`;
+# este Service materializa esse nome no cluster local (antes era "fantasma" e os
+# serviços logavam "traces export: no such host"). Em cloud (EKS) o endpoint usa o
+# OpenTelemetry Collector (values-prod.yaml) — não afeta.
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-saga-otel
+  namespace: order-saga
+  labels:
+    app.kubernetes.io/name: jaeger
+    app.kubernetes.io/part-of: order-saga
+spec:
+  selector:
+    app.kubernetes.io/name: jaeger
+  ports:
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: ui
+      port: 16686
+      targetPort: 16686
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-saga-jaeger
+  namespace: order-saga
+  labels:
+    app.kubernetes.io/name: jaeger
+    app.kubernetes.io/part-of: order-saga
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jaeger
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: jaeger
+        app.kubernetes.io/part-of: order-saga
+    spec:
+      containers:
+        - name: jaeger
+          image: jaegertracing/jaeger:2.9.0
+          ports:
+            - name: otlp-http
+              containerPort: 4318
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: ui
+              containerPort: 16686
+          env:
+            - name: COLLECTOR_OTLP_ENABLED
+              value: "true"
+          readinessProbe:
+            tcpSocket:
+              port: 16686
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 16686
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests: { cpu: "50m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }

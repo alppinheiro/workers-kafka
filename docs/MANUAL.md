@@ -555,6 +555,12 @@ um ciclo por 30s). Dependência inacessível → `503` com o motivo (usado nas p
   atravessa o Kafka e a **outbox** (coluna `traceparent` reconstruída pelo relay).
 - **Jaeger** (`localhost:16686`): buscar por `order_id` e ver o caminho completo
   orquestrador → worker → orquestrador.
+- **Kubernetes (kind):** o `make k8s-up` sobe um **Jaeger all-in-one**
+  (`deploy/k8s/otel.yaml`) exposto pelo Service `order-saga-otel:4318` — o mesmo
+  endpoint que o chart (`values.yaml`) já usava (antes "fantasma", gerando erro de
+  export). UI no kind: `kubectl port-forward -n order-saga svc/order-saga-otel 16686:16686`
+  → http://localhost:16686. Em cloud/EKS o endpoint aponta para o **OpenTelemetry
+  Collector** (`values-prod.yaml`).
 
 ### 11.3 Logs correlacionados
 
