@@ -177,6 +177,10 @@ spec:
           env:
             - name: GF_SECURITY_ADMIN_PASSWORD
               value: admin
+            # Ao logar, abre direto o dashboard principal (pasta Sagas). Requer
+            # que o JSON esteja montado (volume 'dashboards' abaixo).
+            - name: GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH
+              value: /var/lib/grafana/dashboards/saga-overview.json
           readinessProbe:
             tcpSocket:
               port: 3000
