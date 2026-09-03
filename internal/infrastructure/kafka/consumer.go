@@ -18,6 +18,7 @@ import (
 
 	"workers-kafka/internal/application"
 	"workers-kafka/internal/domain"
+	"workers-kafka/internal/infrastructure/logging"
 	"workers-kafka/internal/infrastructure/metrics"
 )
 
@@ -212,8 +213,10 @@ func (c *Consumer) consumeWorker(ctx context.Context, handler application.EventH
 			return err
 		}
 
-		// Propaga o trace (W3C traceparent) dos headers e abre um span por evento.
-		handlerCtx := extractTraceContext(ctx, msg.Headers)
+		// Propaga o trace (W3C traceparent) dos headers, anota o pedido no contexto
+		// (correlation_id) e abre um span por evento. Logs deste fluxo passam a incluir
+		// order_id/correlation_id + trace_id/span_id automaticamente (logging.ctxHandler).
+		handlerCtx := logging.WithOrderID(extractTraceContext(ctx, msg.Headers), event.OrderID)
 		handlerCtx, span := c.tracer().Start(handlerCtx, "consume "+string(event.EventType),
 			trace.WithAttributes(
 				attribute.String("order_id", event.OrderID),

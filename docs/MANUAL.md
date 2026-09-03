@@ -562,22 +562,59 @@ um ciclo por 30s). Dependência inacessível → `503` com o motivo (usado nas p
   → http://localhost:16686. Em cloud/EKS o endpoint aponta para o **OpenTelemetry
   Collector** (`values-prod.yaml`).
 
-### 11.3 Logs correlacionados
+### 11.3 Logs correlacionados (`order_id` = `correlation_id`)
 
-Todos os logs trazem `order_id`, `saga_id`, `event_id` e `phase`. Desde o hardening
-(Fase 10) a saída é **JSON estruturado** (`log/slog`, handler JSON) — CloudWatch/Loki
-leem sem parser customizado:
+**Convenção:** `correlation_id` **= `order_id`** (id único do fluxo de negócio, presente em
+payload, journal, outbox, bancos e spans). O id técnico distribuído é o **`trace_id`**
+(OTel/W3C). O handler de log (`internal/infrastructure/logging`) injeta automaticamente
+`order_id`/`correlation_id` + `trace_id`/`span_id` em **todas** as linhas emitidas com o
+contexto do fluxo (consumer/orchestrator/workers/relay):
 
 ```json
 {"time":"...","level":"INFO","msg":"despachando próximo comando","service":"orchestrator",
  "component":"orchestrator","phase":"decision","action":"dispatch-next",
- "order_id":"order-1","event_type":"PAYMENT_COMMAND","status_current":"PAYMENT_PENDING"}
+ "order_id":"order-1","correlation_id":"order-1",
+ "trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7",
+ "event_type":"PAYMENT_COMMAND","status_current":"PAYMENT_PENDING"}
 {"time":"...","level":"INFO","msg":"evento processado","service":"worker-payment",
- "phase":"processed","event_id":"...","order_id":"order-1","type":"PAYMENT_RESULT",
- "duration":0.000024}
+ "phase":"processed","event_id":"...","order_id":"order-1",
+ "trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"1e9c7a9c1f...",
+ "type":"PAYMENT_RESULT","duration":0.000024}
 ```
 
-### 11.4 Dashboard "Saga - Visão Geral" (Grafana)
+> Logs fora do fluxo (telemetria, ciclo do relay, purga) não têm `order_id` — não pertencem
+> a um pedido. Todo log **dentro** do fluxo de um pedido traz o **mesmo** `correlation_id`
+> (order_id) e o **mesmo** `trace_id`.
+
+### 11.4 Rastrear um dado do início ao fim (runbook)
+
+Seguir um pedido por **todos os serviços** em 4 passos (um único `order_id`/`trace_id`):
+
+1. **Escolha o `order_id`** (ex.: o retorno de `make create-order ORDER_ID=x`).
+2. **Logs**: filtre por `correlation_id` (ou `order_id`) em cada serviço e confira o
+   mesmo `trace_id` em todos:
+   ```bash
+   # compose
+   docker-compose logs --no-color | grep '"correlation_id":"order-1"'
+   # kubernetes
+   kubectl -n order-saga logs -l app.kubernetes.io/part-of=order-saga --prefix \
+     | grep '"order_id":"order-1"'
+   ```
+3. **Trace (Jaeger)**: busque pelo `trace_id` (ou tag `order_id`) em
+   `http://localhost:16686` (kind: `kubectl -n order-saga port-forward svc/order-saga-otel 16686:16686`)
+   e veja a cadeia `create-order → orchestrator → outbox-relay → worker → orchestrator`.
+4. **Estado/dados**: confirme no banco e no journal:
+   ```bash
+   make inspect ORDER_ID=order-1   # read model (order_views)
+   # journal completo
+   docker-compose exec postgres psql -U saga -d saga -c \
+     "SELECT component,event_type,status_anterior,status_atual,created_at
+        FROM saga_events WHERE order_id='order-1' ORDER BY id"
+   ```
+   Se um passo demorar (ex.: pipeline atrás), use as métricas/dashboards
+   (`saga_saga_max_age_seconds{status}`, lag, outbox).
+
+### 11.5 Dashboard "Saga - Visão Geral" (Grafana)
 
 Painéis: throughput por serviço, latência (p50/p95), backlog (`saga_orders_pending`),
 outbox pendente/idade, DLQ e lag por consumer group. Provisionado no compose

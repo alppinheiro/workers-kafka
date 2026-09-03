@@ -2,12 +2,17 @@
 
 > **Status:** planejamento aprovado em 03/09/2026. **Fases A e C concluídas** (métricas P0 +
 > buckets finos + docs) e **parte da Fase B** (regras novas em `prometheus/rules.yml`;
-> Alertmanager/notificação pendente). Dashboards: D0 enriquecido (14 painéis) + D1 `saga-flow`,
-> D2 `kafka-consumers`, D3 `saga-outbox`, D4 `saga-postgres`, D5 `saga-infra`.
+> Alertmanager/notificação **fora de escopo por ora** — decisão do time). Dashboards:
+> D0 enriquecido (14 painéis) + D1 `saga-flow`, D2 `kafka-consumers`, D3 `saga-outbox`,
+> D4 `saga-postgres`, D5 `saga-infra`.
 > **Fase D (fix OTLP): concluída no kind** — Jaeger all-in-one (`deploy/k8s/otel.yaml`)
-> atrás do Service `order-saga-otel:4318` (endpoint que o chart já esperava; eliminado o
-> erro de export) + datasource Jaeger no Grafana (compose). Pendente: spans P1 de etapa/
-> relay e `create-order` como raiz. Próximas: **Fase E (Loki)** e B restante.
+> atrás do Service `order-saga-otel:4318` + datasource Jaeger no Grafana (compose).
+> **Correlação fim-a-fim: concluída** — `correlation_id = order_id`; logs enriquecidos com
+> `order_id/correlation_id + trace_id/span_id` via handler de contexto (`logging`),
+> `order_id` no span `outbox.publish`, root trace no kind (`k8s-smoke` envia
+> `OTEL_EXPORTER_OTLP_ENDPOINT`), runbook "rastrear do início ao fim" no MANUAL §11.4.
+> Pendências: spans P1 de etapa/relay extras, **Fase E (Loki)**, P1/P2 de métricas e
+> exportadores.
 > Escopo: enriquecer o monitoramento do fluxo de saga (orquestrador + workers + projector +
 > outbox-relay) com dashboards acionáveis, novas métricas, alertas/SLO e correlação
 > métrica ↔ trace ↔ log, válido para docker-compose e Kubernetes (kind/EKS).

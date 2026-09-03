@@ -174,6 +174,7 @@ func relayOnce(ctx context.Context, outbox *infrapostgres.OutboxRepository, prod
 		_, span := otel.Tracer("outbox-relay").Start(publishCtx, "outbox.publish",
 			trace.WithAttributes(
 				attribute.String("event_id", entry.EventID),
+				attribute.String("order_id", entry.Key),
 				attribute.String("topic", entry.Topic),
 			))
 		spans = append(spans, span)

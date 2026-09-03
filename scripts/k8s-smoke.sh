@@ -11,6 +11,7 @@ echo "== [$(date +%H:%M:%S)] criando pedido $ORDER_ID =="
 kubectl run create-order-"$ORDER_ID" \
   --image="ghcr.io/alppinheiro/workers-kafka-create-order:$IMG_TAG" \
   --env="KAFKA_BROKERS=kafka:9092" \
+  --env="OTEL_EXPORTER_OTLP_ENDPOINT=order-saga-otel:4318" \
   -n "$NS" --restart=Never -- "$ORDER_ID"
 
 kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/create-order-"$ORDER_ID" \

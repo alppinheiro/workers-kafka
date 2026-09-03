@@ -46,9 +46,9 @@ func main() {
 
 	if err := coordinator.CreateOrder(ctx, orderID); err != nil {
 		span.RecordError(err)
-		slog.Error("erro ao criar pedido", "order_id", orderID, "error", err)
+		slog.ErrorContext(ctx, "erro ao criar pedido", "order_id", orderID, "error", err)
 		os.Exit(1)
 	}
 
-	slog.Info("pedido criado", "order_id", orderID, "status", "PENDING")
+	slog.InfoContext(ctx, "pedido criado", "order_id", orderID, "status", "PENDING")
 }
