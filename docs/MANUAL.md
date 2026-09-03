@@ -375,7 +375,7 @@ de ambiente (12-factor):
 | Ambiente | Como sobe | Observabilidade |
 |---|---|---|
 | **Local (compose)** | `make up` | Jaeger, Prometheus, Grafana no compose |
-| **Kubernetes local (kind)** | `make k8s-up` | métricas por pod (`/metrics`); KEDA |
+| **Kubernetes local (kind)** | `make k8s-up` | Prometheus + Grafana + Jaeger **in-cluster** (`make k8s-grafana`/`k8s-prometheus`); KEDA |
 | **Cloud AWS (EKS)** — Fase 10 | `make aws-up` (Terraform) | kube-prometheus-stack + dashboard |
 | **CI (GitHub Actions)** | push/PR | logs do Actions; Testcontainers reais |
 
@@ -496,7 +496,8 @@ kubectl get hpa -n order-saga                  # escalas do KEDA
 kubectl get scaledobject -n order-saga
 kubectl describe pod -n order-saga <pod>       # investigar CrashLoop/OOM
 kubectl exec -n order-saga deploy/order-saga-postgres -- psql -U saga -d saga -c "..."
-kubectl port-forward -n order-saga svc/order-saga-grafana 3000:3000
+make k8s-grafana                                 # Grafana in-cluster → http://localhost:3000
+make k8s-prometheus                              # Prometheus in-cluster → http://localhost:9090
 ```
 
 ### 10.5 Prometheus (queries úteis)
@@ -614,11 +615,21 @@ Seguir um pedido por **todos os serviços** em 4 passos (um único `order_id`/`t
    Se um passo demorar (ex.: pipeline atrás), use as métricas/dashboards
    (`saga_saga_max_age_seconds{status}`, lag, outbox).
 
-### 11.5 Dashboard "Saga - Visão Geral" (Grafana)
+### 11.5 Dashboards (Grafana)
+
+Os **mesmos 6 dashboards** (`grafana/dashboards/*.json` — Saga - Visão Geral com 14
+painéis, Fluxo do Pedido, Kafka & Consumers, Outbox & Durabilidade, PostgreSQL &
+Sagas, Infra & Recursos) são provisionados em **ambos os ambientes, de forma
+isolada**:
+
+- **compose:** `make up` → Prometheus/Grafana no host (`http://localhost:3000`);
+- **kubernetes (kind):** `make k8s-up` sobe Prometheus + Grafana **in-cluster**
+  (`deploy/k8s/observability.yaml`) scrapeando os Services internos 9101–9107;
+  acesso via `make k8s-grafana` (`http://localhost:3000`, `admin/admin`) e
+  `make k8s-prometheus` (`http://localhost:9090`).
 
 Painéis: throughput por serviço, latência (p50/p95), backlog (`saga_orders_pending`),
-outbox pendente/idade, DLQ e lag por consumer group. Provisionado no compose
-(`grafana/provisioning`); no K8s pode ser importado como JSON.
+outbox pendente/idade, DLQ, lag por consumer group e sagas por status.
 
 ---
 

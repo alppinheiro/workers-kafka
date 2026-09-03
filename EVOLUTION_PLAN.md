@@ -161,7 +161,7 @@ e smoke end-to-end. Validou o design a custo zero antes da cloud (Fase 10). Deta
 - [x] **9.4** Probes `/healthz` (mudança em `metrics.Serve`) + resources por serviço.
 - [x] **9.5** KEDA `ScaledObject` por lag (min 1 / max 3) — orquestrador escalou 1→3 sob carga.
 - [x] **9.6** Smoke no cluster: saga `k8s-smoke-*` até `COMPLETED/FAILED`.
-- [ ] **9.7** Observabilidade (kube-prometheus-stack + dashboard) — **adiado** (recursos do Colima 4 GB); fazer na Fase 10/cloud.
+- [x] **9.7** Observabilidade in-cluster (Prometheus + Grafana + Jaeger no kind via `deploy/k8s/observability.yaml`; kube-prometheus-stack completo adiado p/ Fase 10/cloud).
 
 ---
 

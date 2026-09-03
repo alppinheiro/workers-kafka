@@ -462,6 +462,20 @@ kubectl -n order-saga port-forward deploy/order-saga-orchestrator 9101:9101
 curl -s localhost:9101/metrics | head -40
 ```
 
+**Dashboards — Prometheus + Grafana in-cluster (kind autossuficiente):**
+
+O `make k8s-up` sobe, **dentro do cluster**, o Prometheus (scrape dos Services
+ClusterIP 9101–9107, regras de `prometheus/rules.yml`) e o Grafana com os **mesmos
+6 dashboards** do compose (datasources apontam para `order-saga-prometheus:9090` e
+`order-saga-otel:16686` — tudo interno, sem misturar com o docker-compose).
+
+```bash
+make k8s-grafana          # port-forward → Grafana em http://localhost:3000 (admin/admin)
+make k8s-prometheus       # port-forward → Prometheus em http://localhost:9090
+kubectl -n order-saga get pods -l 'app.kubernetes.io/name in (prometheus,grafana)'
+kubectl -n order-saga get cm order-saga-prometheus-config order-saga-grafana-dashboards
+```
+
 **Logs correlacionados** (JSON, com `order_id`, nas imagens atuais):
 
 ```bash

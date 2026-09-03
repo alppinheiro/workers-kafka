@@ -7,6 +7,10 @@
 > D4 `saga-postgres`, D5 `saga-infra`.
 > **Fase D (fix OTLP): concluída no kind** — Jaeger all-in-one (`deploy/k8s/otel.yaml`)
 > atrás do Service `order-saga-otel:4318` + datasource Jaeger no Grafana (compose).
+> **Dashboards no kind: concluído** — Prometheus + Grafana **in-cluster**
+> (`deploy/k8s/observability.yaml` + `deploy/k8s/prometheus.yml`), mesmos 6 dashboards
+> provisionados, scrape dos Services 9101–9107; acesso via `make k8s-grafana`/
+> `make k8s-prometheus` (ambientes compose ↔ kind isolados).
 > **Correlação fim-a-fim: concluída** — `correlation_id = order_id`; logs enriquecidos com
 > `order_id/correlation_id + trace_id/span_id` via handler de contexto (`logging`),
 > `order_id` no span `outbox.publish`, root trace no kind (`k8s-smoke` envia
@@ -48,9 +52,13 @@ status, idade da outbox) e Kafka (`ListOffsets`/`OffsetFetch`) a cada 10s.
 - **docker-compose:** Prometheus (scrape 5s, `prometheus/prometheus.yml` + `rules.yml`),
   Grafana (datasource provisionado com `uid: Prometheus`, dashboard "Saga - Visão Geral" com
   10 painéis em `grafana/dashboards/saga-overview.json`), Jaeger (OTLP 4318, UI 16686).
-- **Kubernetes (kind):** métricas por pod (`/metrics`) e KEDA; **sem Prometheus/Grafana/Jaeger**
-  (item 9.7 adiado) e o endpoint OTLP aponta para `order-saga-otel:4318` que **não existe**
-  (erros de export nos logs).
+- **Kubernetes (kind):** `make k8s-up` agora sobe a **stack completa in-cluster** —
+  Jaeger all-in-one (`deploy/k8s/otel.yaml`, Service `order-saga-otel:4318`) + Prometheus
+  e Grafana (`deploy/k8s/observability.yaml`) scrapeando os Services ClusterIP 9101–9107.
+  Acesso: `make k8s-grafana` (Grafana em `http://localhost:3000`, admin/admin) e
+  `make k8s-prometheus` (`http://localhost:9090`). Os dois ambientes (compose e kind)
+  são **independentes e isolados** — o Grafana de cada um aponta para datasources do seu
+  próprio ambiente.
 - **Traces:** OTel por evento (`consume <EVENT_TYPE>`, attrs `order_id`/`event_id`, W3C
   `traceparent` via headers Kafka/outbox), exporter OTLP/HTTP.
 - **Alertas:** `prometheus/rules.yml` com `SagaDLQGrowth` e `SagaConsumerStalled` (sem

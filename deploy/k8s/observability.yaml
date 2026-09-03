@@ -1,0 +1,212 @@
+# Observabilidade IN-CLUSTER para o ambiente Kubernetes local (kind).
+#
+# Reproduz, dentro do cluster, o papel do Prometheus/Grafana do docker-compose:
+# os dois ambientes são independentes e não misturam (compose -> tudo no compose;
+# kind -> tudo no kind). O Prometheus scrapeia os Services ClusterIP da aplicação
+# (order-saga-*:9101..9107, ver deploy/k8s/prometheus.yml) e o Grafana provisiona os
+# mesmos dashboards/datasources do repositório apontando para serviços do cluster
+# (order-saga-prometheus:9090 e order-saga-otel:16686 — Jaeger da Fase D).
+#
+# Dependências (configmaps criados pelo Makefile, como os migrations):
+#   - order-saga-prometheus-config  (prometheus.yml kind + prometheus/rules.yml)
+#   - order-saga-grafana-dashboards (JSONs de grafana/dashboards/*.json)
+#
+# Acesso: make k8s-grafana (kubectl port-forward svc/order-saga-grafana 3000:3000)
+# e Prometheus: make k8s-prometheus (port-forward 9090:9090).
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-saga-prometheus
+  namespace: order-saga
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/part-of: order-saga
+spec:
+  selector:
+    app.kubernetes.io/name: prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-saga-prometheus
+  namespace: order-saga
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/part-of: order-saga
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prometheus
+        app.kubernetes.io/part-of: order-saga
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.53.0
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=6h
+          ports:
+            - name: http
+              containerPort: 9090
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: storage
+              mountPath: /prometheus
+          resources:
+            requests: { cpu: "50m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }
+      volumes:
+        - name: config
+          configMap:
+            name: order-saga-prometheus-config
+        - name: storage
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-saga-grafana
+  namespace: order-saga
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/part-of: order-saga
+spec:
+  selector:
+    app.kubernetes.io/name: grafana
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-saga-grafana-datasources
+  namespace: order-saga
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/part-of: order-saga
+data:
+  datasource.yml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://order-saga-prometheus:9090
+        isDefault: true
+      - name: Jaeger
+        uid: jaeger
+        type: jaeger
+        access: proxy
+        url: http://order-saga-otel:16686
+        jsonData:
+          httpMethod: GET
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-saga-grafana-dashboards-provider
+  namespace: order-saga
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/part-of: order-saga
+data:
+  dashboards.yml: |
+    apiVersion: 1
+    providers:
+      - name: sagas
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-saga-grafana
+  namespace: order-saga
+  labels:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/part-of: order-saga
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: grafana
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: grafana
+        app.kubernetes.io/part-of: order-saga
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.2.0
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: admin
+          readinessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+            - name: dashboards-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+              readOnly: true
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+              readOnly: true
+          resources:
+            requests: { cpu: "50m", memory: "128Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }
+      volumes:
+        - name: datasources
+          configMap:
+            name: order-saga-grafana-datasources
+        - name: dashboards-provider
+          configMap:
+            name: order-saga-grafana-dashboards-provider
+        - name: dashboards
+          configMap:
+            name: order-saga-grafana-dashboards

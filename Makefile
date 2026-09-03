@@ -2,7 +2,7 @@ COMPOSE ?= docker-compose
 ORDER_ID ?= order-001
 SERVICES = kafka kafka-init postgres migrations postgres-read migrations-read jaeger prometheus grafana orchestrator worker-payment worker-inventory worker-notification order-status projector outbox-relay metrics-exporter
 
-.PHONY: help fmt build vet test lint check ci integration up down logs ps create-order inspect rebuild k8s-up k8s-images k8s-refresh k8s-down k8s-logs k8s-smoke aws-up aws-down
+.PHONY: help fmt build vet test lint check ci integration up down logs ps create-order inspect rebuild k8s-up k8s-images k8s-refresh k8s-down k8s-logs k8s-smoke k8s-grafana k8s-prometheus aws-up aws-down
 
 help:
 	@echo "Targets disponiveis:"
@@ -27,6 +27,8 @@ help:
 	@echo "  make k8s-down      - derruba o cluster kind e remove os recursos"
 	@echo "  make k8s-logs      - segue os logs de um deployment (SVC=<nome>)"
 	@echo "  make k8s-smoke     - smoke e2e no cluster (ORDER_ID=<id>) - scripts/k8s-smoke.sh"
+	@echo "  make k8s-grafana   - port-forward do Grafana in-cluster (http://localhost:3000, admin/admin)"
+	@echo "  make k8s-prometheus - port-forward do Prometheus in-cluster (http://localhost:9090)"
 	@echo "  make aws-up        - terraform apply (VPC+EKS+RDS na AWS - Fase 10, requer aws configure)"
 	@echo "  make aws-down      - terraform destroy (custo ≈ zero quando parado)"
 
@@ -139,6 +141,19 @@ k8s-up:
 		--set image.pullPolicy=Always
 	kubectl wait --for=condition=complete job/order-saga-migrations -n $(K8S_NAMESPACE) --timeout=120s
 	kubectl rollout status deployment -n $(K8S_NAMESPACE) --timeout=180s
+	# Observabilidade in-cluster (Prometheus + Grafana) - ambiente kind autossuficiente,
+	# independente do docker-compose. ConfigMaps de config/rules e de dashboards (JSONs
+	# do repositório) + manifiesto com Deployments/Services.
+	kubectl create configmap order-saga-prometheus-config \
+		--from-file=prometheus.yml=deploy/k8s/prometheus.yml \
+		--from-file=rules.yml=prometheus/rules.yml -n $(K8S_NAMESPACE) \
+		-o yaml --dry-run=client | kubectl apply -f -
+	kubectl create configmap order-saga-grafana-dashboards \
+		--from-file=grafana/dashboards/ -n $(K8S_NAMESPACE) \
+		-o yaml --dry-run=client | kubectl apply -f -
+	kubectl apply -f deploy/k8s/observability.yaml
+	kubectl rollout status deployment/order-saga-prometheus deployment/order-saga-grafana \
+		-n $(K8S_NAMESPACE) --timeout=180s
 
 # Forca a atualizacao das imagens da app no cluster SEM recriar a infra/cluster.
 # Util depois de religar o Colima/kind (o node cacheia imagens antigas) ou quando
@@ -175,6 +190,15 @@ k8s-logs:
 
 k8s-smoke:
 	bash scripts/k8s-smoke.sh $(ORDER_ID)
+
+# Acesso à observabilidade in-cluster (kind). O Grafana provisiona os mesmos
+# dashboards/datasources do compose, mas aponta para serviços DENTRO do cluster
+# (order-saga-prometheus/order-saga-otel) — ambientes isolados, sem mistura.
+k8s-grafana:
+	kubectl -n $(K8S_NAMESPACE) port-forward svc/order-saga-grafana 3000:3000
+
+k8s-prometheus:
+	kubectl -n $(K8S_NAMESPACE) port-forward svc/order-saga-prometheus 9090:9090
 
 # Fase 10 — Cloud AWS (requer: brew install terraform awscli argocd; aws configure)
 # aws-up cria a infra e roda o bootstrap (kubeconfig + saga_read + Secret + ArgoCD + KEDA).
