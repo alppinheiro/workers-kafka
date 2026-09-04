@@ -192,7 +192,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Eventos movidos para DLQ (5m)",
+      "title": "Grupos com lag alto (>200)",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -205,13 +205,20 @@
       },
       "targets": [
         {
-          "expr": "increase(saga_events_dlq_total[5m]) by (topic)",
-          "legendFormat": "{{topic}}"
+          "expr": "count(saga_consumer_lag > 200)",
+          "legendFormat": "grupos com lag>200"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ops"
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 }
+            ]
+          }
         },
         "overrides": []
       }

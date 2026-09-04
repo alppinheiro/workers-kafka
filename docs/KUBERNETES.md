@@ -465,9 +465,11 @@ curl -s localhost:9101/metrics | head -40
 **Dashboards — Prometheus + Grafana in-cluster (kind autossuficiente):**
 
 O `make k8s-up` sobe, **dentro do cluster**, o Prometheus (scrape dos Services
-ClusterIP 9101–9107, regras de `prometheus/rules.yml`) e o Grafana com os **mesmos
-6 dashboards** do compose (datasources apontam para `order-saga-prometheus:9090` e
-`order-saga-otel:16686` — tudo interno, sem misturar com o docker-compose).
+ClusterIP 9101–9107 + **kube-state-metrics**, regras de `prometheus/rules.yml`) e o
+Grafana com os **mesmos 7 dashboards** do compose, incluindo o **Saga - Escala
+(Autoscaling)** (réplicas atuais × min/max via `kube_deployment_status_replicas` e
+lag × threshold 200). Datasources apontam para `order-saga-prometheus:9090` e
+`order-saga-otel:16686` — tudo interno, sem misturar com o docker-compose.
 
 ```bash
 make k8s-grafana          # port-forward → Grafana em http://localhost:3000 (admin/admin)

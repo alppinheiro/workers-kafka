@@ -62,7 +62,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Erros de processamento/s",
+      "title": "Sagas falhando/s (outcome failed)",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -75,8 +75,8 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(saga_events_failed_total[1m])) by (service)",
-          "legendFormat": "{{service}}"
+          "expr": "sum(rate(saga_orders_terminal_total{outcome=\"failed\"}[1m])) by (job)",
+          "legendFormat": "{{job}}"
         }
       ],
       "fieldConfig": {
@@ -88,7 +88,7 @@
     },
     {
       "type": "stat",
-      "title": "Eventos na DLQ (5min)",
+      "title": "DLQ - profundidade atual",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -101,13 +101,20 @@
       },
       "targets": [
         {
-          "expr": "sum(increase(saga_events_dlq_total[5m]))",
-          "legendFormat": "DLQ"
+          "expr": "sum(saga_dlq_depth)",
+          "legendFormat": "mensagens na DLQ"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short"
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1 }
+            ]
+          }
         },
         "overrides": []
       }

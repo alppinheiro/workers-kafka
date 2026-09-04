@@ -617,19 +617,26 @@ Seguir um pedido por **todos os serviços** em 4 passos (um único `order_id`/`t
 
 ### 11.5 Dashboards (Grafana)
 
-Os **mesmos 6 dashboards** (`grafana/dashboards/*.json` — Saga - Visão Geral com 14
+Os **mesmos 7 dashboards** (`grafana/dashboards/*.json` — Saga - Visão Geral com 14
 painéis, Fluxo do Pedido, Kafka & Consumers, Outbox & Durabilidade, PostgreSQL &
-Sagas, Infra & Recursos) são provisionados em **ambos os ambientes, de forma
-isolada**:
+Sagas, Infra & Recursos e **Saga - Escala (Autoscaling)**) são provisionados em
+**ambos os ambientes, de forma isolada**:
 
 - **compose:** `make up` → Prometheus/Grafana no host (`http://localhost:3000`);
 - **kubernetes (kind):** `make k8s-up` sobe Prometheus + Grafana **in-cluster**
-  (`deploy/k8s/observability.yaml`) scrapeando os Services internos 9101–9107;
-  acesso via `make k8s-grafana` (`http://localhost:3000`, `admin/admin`) e
-  `make k8s-prometheus` (`http://localhost:9090`).
+  (`deploy/k8s/observability.yaml`) scrapeando os Services internos 9101–9107 e o
+  **kube-state-metrics** (métricas `kube_deployment_status_replicas`/HPA para os
+  painéis de escala); acesso via `make k8s-grafana` (`http://localhost:3000`,
+  `admin/admin`) e `make k8s-prometheus` (`http://localhost:9090`).
 
 Painéis: throughput por serviço, latência (p50/p95), backlog (`saga_orders_pending`),
-outbox pendente/idade, DLQ, lag por consumer group e sagas por status.
+outbox pendente/idade, DLQ, lag por consumer group, sagas por status e **réplicas
+atuais × min/max + lag vs threshold 200** (dashboard de escala — ver quem está
+escalado e por quê; no compose os painéis `kube_*` ficam sem dados por não haver
+Kubernetes).
+
+> **Dica (kind):** ao olhar o *Saga - Escala (Autoscaling)*, verde = 1 réplica
+> (mínimo), laranja = escalado pelo KEDA (lag > 200 no consumer group correspondente).
 
 ---
 

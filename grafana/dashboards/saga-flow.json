@@ -170,7 +170,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Erros de processamento/s",
+      "title": "Sagas falhando/s (outcome failed)",
       "datasource": {
         "type": "prometheus",
         "uid": "Prometheus"
@@ -183,8 +183,8 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(saga_events_failed_total[1m])) by (service)",
-          "legendFormat": "{{service}}"
+          "expr": "sum(rate(saga_orders_terminal_total{outcome=\"failed\"}[1m])) by (job)",
+          "legendFormat": "{{job}}"
         }
       ],
       "fieldConfig": {

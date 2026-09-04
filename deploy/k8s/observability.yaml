@@ -214,3 +214,107 @@ spec:
         - name: dashboards
           configMap:
             name: order-saga-grafana-dashboards
+---
+# kube-state-metrics: métricas de réplicas/HPA dos Deployments (Kubernetes), usadas
+# pelos dashboards de escala ("está escalado ou não?"). Scrapeado pelo Prometheus
+# in-cluster via job kube-state-metrics (deploy/k8s/prometheus.yml).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: order-saga-kube-state-metrics
+  namespace: order-saga
+  labels:
+    app.kubernetes.io/name: kube-state-metrics
+    app.kubernetes.io/part-of: order-saga
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: order-saga-kube-state-metrics
+  labels:
+    app.kubernetes.io/name: kube-state-metrics
+    app.kubernetes.io/part-of: order-saga
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "pods", "services", "configmaps", "secrets", "persistentvolumeclaims", "replicationcontrollers", "namespaces", "endpoints", "limitranges"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs", "jobs"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: order-saga-kube-state-metrics
+  labels:
+    app.kubernetes.io/name: kube-state-metrics
+    app.kubernetes.io/part-of: order-saga
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: order-saga-kube-state-metrics
+subjects:
+  - kind: ServiceAccount
+    name: order-saga-kube-state-metrics
+    namespace: order-saga
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-saga-kube-state-metrics
+  namespace: order-saga
+  labels:
+    app.kubernetes.io/name: kube-state-metrics
+    app.kubernetes.io/part-of: order-saga
+spec:
+  selector:
+    app.kubernetes.io/name: kube-state-metrics
+  ports:
+    - name: http-metrics
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-saga-kube-state-metrics
+  namespace: order-saga
+  labels:
+    app.kubernetes.io/name: kube-state-metrics
+    app.kubernetes.io/part-of: order-saga
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kube-state-metrics
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kube-state-metrics
+        app.kubernetes.io/part-of: order-saga
+    spec:
+      serviceAccountName: order-saga-kube-state-metrics
+      containers:
+        - name: kube-state-metrics
+          image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.10.0
+          ports:
+            - name: http-metrics
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "20m", memory: "64Mi" }
+            limits: { cpu: "250m", memory: "256Mi" }
