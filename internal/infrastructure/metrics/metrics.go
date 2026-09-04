@@ -57,6 +57,13 @@ var (
 		Help: "Sagas em status intermediários (fila do pipeline).",
 	}, []string{"status"})
 
+	// ordersByStatus expõe TODOS os status de sagas (incluindo terminais COMPLETED/FAILED e
+	// os transientes com valor 0) para uma visão completa do estado atual no dashboard.
+	ordersByStatus = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "saga_orders_by_status",
+		Help: "Sagas por status (visão completa: intermediários + terminais + zero).",
+	}, []string{"status"})
+
 	ordersCompleted = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "saga_orders_completed_total",
 		Help: "Sagas COMPLETED.",
@@ -123,7 +130,7 @@ func init() {
 		eventsReceived, eventsProcessed, eventsFailed, eventsDLQ,
 		processDuration, eventsPublished,
 		outboxPending, outboxPublished,
-		ordersPending, ordersCompleted, ordersFailed,
+		ordersPending, ordersCompleted, ordersFailed, ordersByStatus,
 		outboxMaxAge, consumerLag,
 		ordersTerminal, sagaMaxAge, dlqDepth,
 		consumerLastProgress, consumerReconnects, outboxGenerated,
@@ -177,6 +184,18 @@ func SetOrdersCompleted(n int) {
 
 func SetOrdersFailed(n int) {
 	ordersFailed.Set(float64(n))
+}
+
+// SetOrdersByStatus atualiza a contagem de sagas em um status (visão completa: inclui
+// terminais COMPLETED/FAILED e status transientes com valor 0, mantendo a série estável).
+func SetOrdersByStatus(status string, n int) {
+	ordersByStatus.WithLabelValues(status).Set(float64(n))
+}
+
+// ResetOrdersByStatus limpa todos os labels de status antes de um novo ciclo de coleta
+// (anti-gauge-stale, mesmo comportamento do ResetOrdersPending).
+func ResetOrdersByStatus() {
+	ordersByStatus.Reset()
 }
 
 func SetOutboxMaxAge(seconds float64) {

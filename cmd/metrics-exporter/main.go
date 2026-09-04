@@ -29,6 +29,14 @@ var (
 	flowTopics     = infrakafka.FlowTopics()
 	flowPartitions = []int{0, 1, 2, 3}
 
+	// allSagaStatuses são todos os status do ciclo de vida da saga (domain.OrderStatus),
+	// usados para expor a visão completa em saga_orders_by_status — inclusive os terminais
+	// (COMPLETED/FAILED) e os transientes que podem estar com 0 no momento.
+	allSagaStatuses = []string{
+		"PENDING", "PAYMENT_PENDING", "PAYMENT_APPROVED", "PAYMENT_REFUND_PENDING",
+		"INVENTORY_RESERVED", "NOTIFIED", "COMPLETED", "PAYMENT_REFUNDED", "RETRYING", "FAILED",
+	}
+
 	// flowDLQTopics são os tópicos de DLQ do pipeline (1 partição cada no compose/kind).
 	flowDLQTopics = func() []string {
 		dlqs := make([]string, 0, len(flowTopics))
@@ -76,6 +84,8 @@ func main() {
 
 // refreshSagas atualiza os gauges de sagas por status. ResetOrdersPending é chamado
 // ANTES do Set para zerar labels de status que não existem mais (anti-gauge-stale).
+// A visão completa (saga_orders_by_status) é alimentada com TODOS os status conhecidos,
+// inclusive terminais e os que estão com 0, para o dashboard exibir a imagem inteira.
 func refreshSagas(ctx context.Context, pool *pgxpool.Pool) {
 	rows, err := pool.Query(ctx, `SELECT current_status, count(*) FROM sagas GROUP BY current_status`)
 	if err != nil {
@@ -84,8 +94,10 @@ func refreshSagas(ctx context.Context, pool *pgxpool.Pool) {
 	}
 	defer rows.Close()
 
-	metrics.ResetOrdersPending()
-	totalCompleted, totalFailed := 0, 0
+	counts := make(map[string]int, len(allSagaStatuses))
+	for _, s := range allSagaStatuses {
+		counts[s] = 0
+	}
 	for rows.Next() {
 		var status string
 		var n int
@@ -93,18 +105,21 @@ func refreshSagas(ctx context.Context, pool *pgxpool.Pool) {
 			slog.Error("erro ao ler linha de sagas", "error", err)
 			return
 		}
-		switch status {
-		case "COMPLETED":
-			totalCompleted = n
-		case "FAILED":
-			totalFailed = n
-		default:
-			metrics.SetOrdersPending(status, n)
-		}
+		counts[status] = n
 	}
 
-	metrics.SetOrdersCompleted(totalCompleted)
-	metrics.SetOrdersFailed(totalFailed)
+	metrics.ResetOrdersPending()
+	metrics.ResetOrdersByStatus()
+	for _, s := range allSagaStatuses {
+		n := counts[s]
+		metrics.SetOrdersByStatus(s, n)
+		if s == "COMPLETED" || s == "FAILED" {
+			continue
+		}
+		metrics.SetOrdersPending(s, n)
+	}
+	metrics.SetOrdersCompleted(counts["COMPLETED"])
+	metrics.SetOrdersFailed(counts["FAILED"])
 }
 
 // refreshSagaAges expõe a idade (s) da saga mais antiga ainda em cada status
