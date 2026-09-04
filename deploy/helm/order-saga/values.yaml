@@ -75,21 +75,21 @@ services:
     db: write
     keda:
       consumerGroup: worker-payment
-      topic: orders.payment
+      topic: orders.payment.cmd
   - name: worker-inventory
     image: workers-kafka-worker-inventory
     metricsPort: 9103
     db: write
     keda:
       consumerGroup: worker-inventory
-      topic: orders.inventory
+      topic: orders.inventory.cmd
   - name: worker-notification
     image: workers-kafka-worker-notification
     metricsPort: 9104
     db: write
     keda:
       consumerGroup: worker-notification
-      topic: orders.notification
+      topic: orders.notification.cmd
   - name: order-status
     image: workers-kafka-order-status
     db: none
